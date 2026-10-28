@@ -1,0 +1,1 @@
+{"name": "demo-rot-base64", "category": "crypto", "description": "Challenge de démonstration : le message a subi deux transformations successives.", "files": ["message.txt"], "flag": "demo{deux_couches}"}

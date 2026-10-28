@@ -1,0 +1,1 @@
+{"name": "demo-xor", "category": "crypto", "description": "Challenge de démonstration : ce fichier binaire cache un court texte.", "files": ["secret.bin"], "flag": "demo{xor_un_octet}"}

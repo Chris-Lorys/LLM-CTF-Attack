@@ -129,3 +129,38 @@ def test_modele_injoignable(tmp_path):
     model = make_model("ollama:inexistant", "http://127.0.0.1:9/v1")
     summary = run_challenge(FIXTURES / "demo-encode" / "challenge.json", tmp_path, model)
     assert summary["status"] == "erreur_llm"
+
+
+# --- Rapport et lancement en lot ---------------------------------------------
+
+def test_rapport_tire_de_la_trace(tmp_path):
+    model = ScriptedModel([
+        act("decode", ops="base64", file="message.txt"),
+        act("check_flag", candidate="qrzb{faux|`x`}"),
+        act("decode", ops="base64|rot13", file="message.txt"),
+    ])
+    summary = run_challenge(FIXTURES / "demo-rot-base64" / "challenge.json", tmp_path, model)
+    assert summary["status"] == "resolu"
+    report = Path(summary["report"]).read_text()
+    events = _events(summary)
+    assert "demo{deux\\_couches}" in report and "oui, source : auto:decode" in report
+    assert events[-1]["hash"] in report and "intègre" in report
+    assert "flag refusé" in report
+    # Un contenu venu du LLM ou du challenge ne casse pas le tableau.
+    assert "\\|\\`x\\`" in report
+
+
+def test_rapport_signale_une_trace_falsifiee(tmp_path):
+    from csaw_agent.report import build_report
+    summary = run_challenge(FIXTURES / "demo-clair" / "challenge.json", tmp_path)
+    trace = Path(summary["run_dir"]) / "trace.jsonl"
+    trace.write_text(trace.read_text().replace('"valid": false', '"valid": true'))
+    assert "ÉCHEC" in build_report(trace)
+
+
+def test_run_all_ecrit_un_bilan(tmp_path):
+    from csaw_agent.__main__ import run_all
+    results = run_all(FIXTURES, tmp_path, None, 5)
+    assert len(results) == 4
+    bilan = json.loads((tmp_path / "bilan.json").read_text())
+    assert {r["status"] for r in bilan} == {"resolu", "non_resolu"}

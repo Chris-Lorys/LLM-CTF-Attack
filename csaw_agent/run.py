@@ -16,6 +16,7 @@ from .agent import Agent
 from .challenge import Challenge, load_challenge
 from .flag import FlagVerifier, find_candidates
 from .llm import ChatModel
+from .report import write_report
 from .tools import Toolbox
 from .trace import TraceWriter
 
@@ -87,4 +88,6 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
         "run_dir": str(run_dir),
     }
     trace.log("end", summary)
+    # Le rapport est tiré de la trace une fois celle-ci close : il n'y ajoute rien.
+    summary["report"] = str(write_report(trace.path))
     return summary
