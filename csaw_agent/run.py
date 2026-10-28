@@ -1,8 +1,8 @@
-"""Orchestration minimale d'un run : ingestion, pré-scan déterministe, fin.
+"""Orchestration d'un run : ingestion, pré-scan déterministe, boucle LLM, fin.
 
-La boucle LLM (stratégie, outils, adaptation) viendra se brancher entre le
-pré-scan et la fin. Ce module fixe déjà ce que tout run doit respecter :
-un dossier par run, une trace écrite par le code, un flag vérifié hors LLM.
+Ce module fixe ce que tout run doit respecter : un dossier par run, une trace
+écrite par le code, un flag vérifié hors LLM. Le LLM n'intervient que si le
+pré-scan, gratuit et déterministe, n'a rien trouvé.
 """
 
 from __future__ import annotations
@@ -12,8 +12,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .agent import Agent
 from .challenge import Challenge, load_challenge
 from .flag import FlagVerifier, find_candidates
+from .llm import ChatModel
+from .tools import Toolbox
 from .trace import TraceWriter
 
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -24,7 +27,8 @@ def _readable_strings(data: bytes, min_len: int = 4) -> str:
     return "\n".join(m.decode() for m in re.findall(rb"[\x20-\x7e]{%d,}" % min_len, data))
 
 
-def prescan(challenge: Challenge, verifier: FlagVerifier, trace: TraceWriter) -> str | None:
+def prescan(challenge: Challenge, verifier: FlagVerifier, trace: TraceWriter,
+            tried: set[str] | None = None) -> str | None:
     """Cherche un flag en clair dans la description et les fichiers.
 
     Pas de LLM ici : regex puis vérification. Couvre les cas triviaux et
@@ -39,6 +43,8 @@ def prescan(challenge: Challenge, verifier: FlagVerifier, trace: TraceWriter) ->
         trace.log("tool_result", {"tool": "prescan", "source": source,
                                   "candidates": candidates})
         for candidate in candidates:
+            if tried is not None:
+                tried.add(candidate)
             ok = verifier.check(candidate)
             trace.log("check_flag", {"candidate": candidate, "source": source, "valid": ok})
             if ok:
@@ -46,7 +52,8 @@ def prescan(challenge: Challenge, verifier: FlagVerifier, trace: TraceWriter) ->
     return None
 
 
-def run_challenge(json_path: Path, runs_dir: Path = Path("runs")) -> dict:
+def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
+                  model: ChatModel | None = None, max_steps: int = 20) -> dict:
     started = time.monotonic()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = Path(runs_dir) / _SAFE.sub("_", Path(json_path).parent.name) / stamp
@@ -58,12 +65,23 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs")) -> dict:
     challenge, verifier = load_challenge(json_path, run_dir)
     trace.log("ingestion", challenge.to_view())
 
-    flag = prescan(challenge, verifier, trace)
+    tried: set[str] = set()
+    flag = prescan(challenge, verifier, trace, tried)
     status = "resolu" if flag else "non_resolu"
+    category, steps = None, 0
+
+    if flag is None and model is not None:
+        agent = Agent(model, Toolbox(run_dir / "files"), verifier, trace, max_steps)
+        result = agent.solve(challenge, tried)
+        flag, category, steps = result.flag, result.category, result.steps
+        status = result.status if result.status != "budget_epuise" else "non_resolu"
 
     summary = {
         "status": status,
         "flag": flag,
+        "model": model.name if model else None,
+        "category": category,
+        "llm_steps": steps,
         "attempts": verifier.attempts,
         "duration_s": round(time.monotonic() - started, 3),
         "run_dir": str(run_dir),

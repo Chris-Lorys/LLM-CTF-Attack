@@ -1,6 +1,7 @@
 """Ligne de commande.
 
     python -m csaw_agent run chemin/vers/challenge.json
+    python -m csaw_agent run chemin/vers/challenge.json --model ollama:qwen2.5:3b
     python -m csaw_agent verify-trace runs/<challenge>/<horodatage>/trace.jsonl
 """
 
@@ -12,6 +13,7 @@ import sys
 from pathlib import Path
 
 from .challenge import ChallengeError
+from .llm import make_model
 from .run import run_challenge
 from .trace import verify_trace
 
@@ -23,6 +25,10 @@ def main(argv: list[str] | None = None) -> int:
     p_run = sub.add_parser("run", help="résoudre un challenge")
     p_run.add_argument("challenge_json", type=Path)
     p_run.add_argument("--runs-dir", type=Path, default=Path("runs"))
+    p_run.add_argument("--model", help="préréglage:modèle, p. ex. ollama:qwen2.5:3b, "
+                       "groq:llama-3.3-70b-versatile ; sans --model, pré-scan seul")
+    p_run.add_argument("--base-url", help="URL d'un service compatible OpenAI (Kaggle, vLLM...)")
+    p_run.add_argument("--max-steps", type=int, default=20)
 
     p_verify = sub.add_parser("verify-trace", help="vérifier l'intégrité d'une trace")
     p_verify.add_argument("trace", type=Path)
@@ -31,7 +37,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         try:
-            summary = run_challenge(args.challenge_json, args.runs_dir)
+            model = make_model(args.model, args.base_url) if args.model else None
+            summary = run_challenge(args.challenge_json, args.runs_dir, model, args.max_steps)
         except ChallengeError as exc:
             print(f"erreur : {exc}", file=sys.stderr)
             return 2
