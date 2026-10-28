@@ -1,0 +1,12 @@
+[project]
+name = "csaw-agent"
+version = "0.1.0"
+description = "Agent CTF autonome pour la CSAW LLM CTF Attack Competition 2026"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

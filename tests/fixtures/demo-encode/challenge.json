@@ -1,0 +1,1 @@
+{"name": "demo-encode", "category": "cryptography", "description": "Challenge de démonstration : le flag est encodé.", "files": ["message.txt"], "flag": "demo{base64_decode}"}

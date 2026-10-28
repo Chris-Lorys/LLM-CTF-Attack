@@ -1,0 +1,1 @@
+{"name": "demo-clair", "category": "Forensics", "description": "Challenge de démonstration : le flag est en clair dans le fichier.", "files": ["note.bin"], "flag": "demo{socle_ok}"}
