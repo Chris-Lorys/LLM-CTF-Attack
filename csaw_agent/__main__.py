@@ -3,6 +3,8 @@
     python -m csaw_agent run chemin/vers/challenge.json
     python -m csaw_agent run chemin/vers/challenge.json --model ollama:qwen2.5:3b
     python -m csaw_agent run-all dossier/de/challenges --model ollama:qwen2.5:7b
+    python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json --skip-server --model ...
+    python -m csaw_agent list CSAW26_LLMAC_DB/dataset.json
     python -m csaw_agent verify-trace runs/<challenge>/<horodatage>/trace.jsonl
     python -m csaw_agent report runs/<challenge>/<horodatage>/trace.jsonl
 """
@@ -14,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from .challenge import ChallengeError
+from .challenge import ChallengeError, ChallengeRef, discover
 from .llm import make_model
 from .report import write_report
 from .run import run_challenge
@@ -29,19 +31,47 @@ def _add_model_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-steps", type=int, default=20)
 
 
-def run_all(root: Path, runs_dir: Path, model, max_steps: int) -> list[dict]:
-    """Lance l'agent sur chaque challenge.json trouvé sous `root` et écrit un bilan."""
+def _add_select_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--category", action="append", dest="categories",
+                   help="ne garder que cette catégorie (option répétable)")
+    p.add_argument("--only", action="append", help="identifiant de challenge (répétable)")
+
+
+def select(refs: list[ChallengeRef], categories: list[str] | None = None,
+           only: list[str] | None = None) -> list[ChallengeRef]:
+    if categories:
+        refs = [r for r in refs if r.category in categories]
+    if only:
+        refs = [r for r in refs if r.id in only]
+    return refs
+
+
+def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
+            categories: list[str] | None = None, only: list[str] | None = None,
+            skip_server: bool = False) -> list[dict]:
+    """Lance l'agent sur chaque challenge de la base et écrit un bilan.
+
+    Avec `skip_server`, les challenges qui demandent un service réseau (champ
+    `compose` de la base CSAW) sont notés `ignore_serveur` sans être lancés :
+    l'agent n'a pas encore d'outil réseau ni de conteneur pour les servir.
+    """
     results = []
-    for path in sorted(Path(root).rglob("challenge.json")):
-        try:
-            summary = run_challenge(path, runs_dir, model, max_steps)
-        except ChallengeError as exc:
-            summary = {"status": "erreur_challenge", "error": str(exc)}
-        summary["challenge"] = str(path)
+    runs_dir = Path(runs_dir)
+    for ref in select(discover(root), categories, only):
+        if skip_server and ref.needs_server:
+            summary = {"status": "ignore_serveur"}
+        else:
+            try:
+                summary = run_challenge(ref.json_path, runs_dir, model, max_steps)
+            except ChallengeError as exc:
+                summary = {"status": "erreur_challenge", "error": str(exc)}
+        summary.update(id=ref.id, category_db=ref.category, challenge=str(ref.json_path))
         results.append(summary)
-        print(f"{summary['status']:<20} {path}", flush=True)
+        print(f"{summary['status']:<20} {ref.category:<10} {ref.id}", flush=True)
+    launched = [r for r in results if r["status"] != "ignore_serveur"]
     solved = sum(r["status"] == "resolu" for r in results)
-    print(f"\n{solved}/{len(results)} challenge(s) résolu(s)")
+    print(f"\n{solved}/{len(launched)} challenge(s) lancé(s) résolu(s)"
+          f" ; {len(results) - len(launched)} ignoré(s) faute de serveur")
     runs_dir.mkdir(parents=True, exist_ok=True)
     (runs_dir / "bilan.json").write_text(
         json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -57,8 +87,15 @@ def main(argv: list[str] | None = None) -> int:
     _add_model_args(p_run)
 
     p_all = sub.add_parser("run-all", help="résoudre tous les challenges d'un dossier")
-    p_all.add_argument("root", type=Path)
+    p_all.add_argument("root", type=Path, help="dossier de challenges ou dataset.json")
     _add_model_args(p_all)
+    _add_select_args(p_all)
+    p_all.add_argument("--skip-server", action="store_true",
+                       help="ne pas lancer les challenges qui demandent un serveur")
+
+    p_list = sub.add_parser("list", help="lister les challenges d'une base")
+    p_list.add_argument("root", type=Path)
+    _add_select_args(p_list)
 
     p_verify = sub.add_parser("verify-trace", help="vérifier l'intégrité d'une trace")
     p_verify.add_argument("trace", type=Path)
@@ -71,8 +108,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("run", "run-all"):
         model = make_model(args.model, args.base_url) if args.model else None
         if args.command == "run-all":
-            results = run_all(args.root, args.runs_dir, model, args.max_steps)
-            return 0 if results and all(r["status"] == "resolu" for r in results) else 1
+            results = run_all(args.root, args.runs_dir, model, args.max_steps,
+                              categories=args.categories, only=args.only,
+                              skip_server=args.skip_server)
+            launched = [r for r in results if r["status"] != "ignore_serveur"]
+            return 0 if launched and all(r["status"] == "resolu" for r in launched) else 1
         try:
             summary = run_challenge(args.challenge_json, args.runs_dir, model, args.max_steps)
         except ChallengeError as exc:
@@ -80,6 +120,13 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0 if summary["status"] == "resolu" else 1
+
+    if args.command == "list":
+        refs = select(discover(args.root), args.categories, args.only)
+        for r in refs:
+            print(f"{r.id:<45} {r.category:<10} {'serveur' if r.needs_server else 'fichiers'}")
+        print(f"\n{len(refs)} challenge(s), dont {sum(r.needs_server for r in refs)} avec serveur")
+        return 0
 
     if args.command == "report":
         print(write_report(args.trace))

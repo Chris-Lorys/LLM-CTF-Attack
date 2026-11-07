@@ -18,7 +18,7 @@ un échec.
 | `csaw_agent/trace.py` | 7. Trace | Journal JSONL en ajout seul, chaîné par SHA-256, vérifiable |
 | `csaw_agent/untrusted.py` | Sécurité | Nettoie, tronque et encadre les données non fiables avant le LLM |
 | `csaw_agent/llm.py` | Modèle | Interface unique `complete(messages)` pour tout service compatible OpenAI |
-| `csaw_agent/tools.py` | 4. Outils | Outils typés et validés : `file_info`, `read_file`, `strings`, `decode`, `xor_bruteforce` |
+| `csaw_agent/tools.py` | 4. Outils | Outils typés et validés : `file_info`, `read_file`, `strings`, `decode`, `xor_bruteforce`, `extract` |
 | `csaw_agent/agent.py` | 2-5. Type, stratégie, adaptation | Boucle : le LLM choisit une action en JSON, le code l'exécute |
 | `csaw_agent/run.py` | Orchestration | Un dossier par run, pré-scan sans LLM, puis boucle LLM si besoin |
 | `csaw_agent/report.py` | 7. Rapport | `rapport.md` tiré de la trace par du code : flag validé, intégrité, déroulement |
@@ -46,6 +46,7 @@ La clé d'API n'est lue que dans la variable d'environnement et n'est jamais éc
 python -m csaw_agent run tests/fixtures/demo-clair/challenge.json          # pré-scan seul
 python -m csaw_agent run tests/fixtures/demo-encode/challenge.json --model ollama:qwen2.5:3b
 python -m csaw_agent run-all tests/fixtures --model ollama:qwen2.5:7b         # tous les challenges, bilan.json
+python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json --skip-server --model ollama:qwen2.5:7b
 python -m csaw_agent verify-trace runs/demo-clair/<horodatage>/trace.jsonl
 python -m csaw_agent report runs/demo-clair/<horodatage>/trace.jsonl
 python -m pytest
@@ -61,9 +62,13 @@ vérifier que la trace jointe est bien celle dont il est tiré.
 - La description, les fichiers et les sorties d'outils sont encadrés comme données non fiables ;
   les outils refusent tout fichier hors de l'espace de travail du run.
 - La trace est écrite par le code, jamais retouchée ; `verify-trace` détecte toute modification.
-- Les prompts ne contiennent aucune solution ni write-up.
+- Les prompts ne contiennent aucune solution ni write-up. Les fichiers de solution rangés dans
+  les dossiers de la base CSAW (`solution/`, `solve.py`, `writeup.md`, `flag.txt`) ne sont jamais
+  copiés : seuls les fichiers listés dans `files` le sont, et un garde-fou écarte tout nom suspect.
 - Les challenges de `tests/fixtures/` ont été créés pour ce projet et ne viennent d'aucune compétition.
 
 ## Documentation
+
+- Base officielle CSAW 2026 (format, solutions écartées, limites) : [docs/csaw-2026.md](docs/csaw-2026.md)
 
 Document de conception : https://claude.ai/artifact/6SttWmKq4MwDtjhUHTHtpj

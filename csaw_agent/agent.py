@@ -91,6 +91,9 @@ def initial_message(challenge: Challenge) -> str:
         lines.append(f"- {f.name} : {f.size} octets, {guess_type(f.path.read_bytes()[:4096])}")
     if not challenge.files:
         lines.append("- aucun")
+    if challenge.needs_server:
+        lines.append("Note : ce challenge a un service réseau, mais tu n'as pas encore d'outil "
+                     "pour t'y connecter. Tire le maximum des fichiers fournis.")
     lines.append("Description :")
     lines.append(wrap_untrusted(challenge.description, "description du challenge"))
     lines.append("Commence par ton plan et ta première action.")
