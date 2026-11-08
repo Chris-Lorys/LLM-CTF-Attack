@@ -195,6 +195,8 @@ class Agent:
                 ok = True
             except ToolError as exc:
                 output, ok = f"erreur : {exc}", False
+            except Exception as exc:  # bug d'outil : tracé et renvoyé au LLM, le run continue
+                output, ok = f"erreur interne de l'outil : {type(exc).__name__}: {exc}", False
             self.trace.log("tool_result", {"step": step, "tool": name, "ok": ok,
                                            "output": output})
 

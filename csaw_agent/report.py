@@ -35,7 +35,10 @@ def build_report(trace_path: Path) -> str:
     trace_path = Path(trace_path)
     ok, integrity = verify_trace(trace_path)
     raw = trace_path.read_bytes()
-    events = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip()]
+    # split("\n") et non splitlines() : une sortie d'outil peut contenir \x85 ou
+    # U+2028, que json.dumps(ensure_ascii=False) laisse tels quels et que
+    # splitlines() prendrait pour des fins de ligne (plantage vu sur Kaggle).
+    events = [json.loads(line) for line in raw.decode("utf-8").split("\n") if line.strip()]
 
     def _sandbox_cell(box: dict) -> str:
         if not box:

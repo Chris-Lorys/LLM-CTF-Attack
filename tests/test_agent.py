@@ -249,3 +249,47 @@ def test_outil_inconnu_liste_les_outils(tmp_path):
     from csaw_agent.tools import Toolbox, ToolError
     with pytest.raises(ToolError, match="read_file"):
         Toolbox(tmp_path).call("nc", {})
+
+
+# --- Robustesse du lot et liens symboliques posés par le shell ---------------
+
+def test_run_all_continue_apres_un_plantage(tmp_path, monkeypatch):
+    import json
+    from csaw_agent import __main__ as cli
+    for name in ("a", "b"):
+        d = tmp_path / "db" / name
+        d.mkdir(parents=True)
+        (d / "challenge.json").write_text(json.dumps({"name": name, "flag": "x{y}"}))
+    real = cli.run_challenge
+
+    def flaky(path, *a, **k):
+        if path.parent.name == "a":
+            raise RuntimeError("boum")
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(cli, "run_challenge", flaky)
+    results = cli.run_all(tmp_path / "db", tmp_path / "runs", None, 3)
+    assert [r["status"] for r in results] == ["erreur_interne", "non_resolu"]
+    assert len(json.loads((tmp_path / "runs" / "bilan.json").read_text())) == 2
+
+
+def test_outils_ne_suivent_pas_un_lien_vers_l_exterieur(tmp_path):
+    import io
+    import zipfile
+    import pytest
+    from csaw_agent.tools import Toolbox, ToolError
+    secret = tmp_path / "secret.txt"
+    secret.write_text("demo{fuite}")
+    files = tmp_path / "files"
+    files.mkdir()
+    (files / "lien").symlink_to(secret)
+    box = Toolbox(files)
+    with pytest.raises(ToolError):
+        box.call("read_file", {"file": "lien"})
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("x.txt", "contenu")
+    (files / "a.zip").write_bytes(buf.getvalue())
+    (files / "a.zip__x.txt").symlink_to(tmp_path / "cible")  # lien pendant
+    assert "déjà extrait" in box.call("extract", {"file": "a.zip"})
+    assert not (tmp_path / "cible").exists()
