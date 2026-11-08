@@ -16,6 +16,7 @@ import codecs
 import hashlib
 import io
 import math
+import os
 import re
 import stat
 import tarfile
@@ -235,10 +236,14 @@ class Toolbox:
         for member, content in members:
             flat = re.sub(r"[^A-Za-z0-9_.-]+", "_", member.strip("/").replace("/", "__"))
             target = self.files_dir / f"{stem}__{flat}"
-            if target.exists():
+            # lexists : un lien symbolique posé par le shell ne doit pas être suivi
+            # (l'extraction tourne en root, hors du bac à sable).
+            if os.path.lexists(target):
                 rows.append(f"{target.name}\t(déjà extrait)")
                 continue
-            target.write_bytes(content)
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o444)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(content)
             target.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
             rows.append(f"{target.name}\t{len(content)} octets\t{guess_type(content[:4096])}")
         return "\n".join(rows) or "(archive vide)"

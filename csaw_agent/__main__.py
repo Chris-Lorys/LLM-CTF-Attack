@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import traceback
 from pathlib import Path
 
 from .challenge import ChallengeError, ChallengeRef, discover
@@ -74,17 +75,26 @@ def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
                 summary = run_challenge(ref.json_path, runs_dir, model, max_steps, sandbox)
             except ChallengeError as exc:
                 summary = {"status": "erreur_challenge", "error": str(exc)}
+            except Exception as exc:  # un challenge qui plante ne doit pas arrêter le lot
+                traceback.print_exc()
+                summary = {"status": "erreur_interne", "error": f"{type(exc).__name__}: {exc}"}
         summary.update(id=ref.id, category_db=ref.category, challenge=str(ref.json_path))
         results.append(summary)
         print(f"{summary['status']:<20} {ref.category:<10} {ref.id}", flush=True)
+        _write_bilan(runs_dir, results)  # écrit après chaque challenge
     launched = [r for r in results if r["status"] != "ignore_serveur"]
     solved = sum(r["status"] == "resolu" for r in results)
     print(f"\n{solved}/{len(launched)} challenge(s) lancé(s) résolu(s)"
           f" ; {len(results) - len(launched)} ignoré(s) faute de serveur")
-    runs_dir.mkdir(parents=True, exist_ok=True)
-    (runs_dir / "bilan.json").write_text(
-        json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_bilan(runs_dir, results)
     return results
+
+
+def _write_bilan(runs_dir: Path, results: list[dict]) -> None:
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    tmp = runs_dir / "bilan.json.tmp"
+    tmp.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(runs_dir / "bilan.json")
 
 
 def main(argv: list[str] | None = None) -> int:
