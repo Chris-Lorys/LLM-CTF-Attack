@@ -199,3 +199,53 @@ def test_extract_refuse_une_non_archive(tmp_path):
     (files / "t.txt").write_text("pas une archive")
     with pytest.raises(ToolError):
         Toolbox(files).call("extract", {"file": "t.txt"})
+
+
+# --- Fautes relevées dans le premier essai Kaggle (qwen2.5:7b) --------------
+
+def test_parse_action_repare_les_echappements_hex():
+    from csaw_agent.agent import parse_action
+    text = '{"action": "check_flag", "args": {"candidate": "ab\\x0bcd"}}'
+    assert parse_action(text)["args"]["candidate"] == "ab\x0bcd"
+
+
+def test_parse_action_garde_un_antislash_echappe():
+    from csaw_agent.agent import parse_action
+    text = '{"action": "decode", "args": {"data": "a\\\\x41"}}'
+    assert parse_action(text)["args"]["data"] == "a\\x41"
+
+
+def test_parse_action_entier_hexadecimal():
+    from csaw_agent.agent import parse_action
+    text = '{"action": "read_file", "args": {"file": "a", "offset": 0x200, "data": "0x41"}}'
+    args = parse_action(text)["args"]
+    assert args["offset"] == 512 and args["data"] == "0x41"
+
+
+def test_parse_action_reponse_vide():
+    import pytest
+    from csaw_agent.agent import parse_action
+    with pytest.raises(ValueError, match="vide"):
+        parse_action("   ")
+
+
+def test_decode_tolere_data_et_file(tmp_path):
+    from csaw_agent.tools import Toolbox
+    files = tmp_path / "files"
+    files.mkdir()
+    (files / "m.txt").write_text("aGVsbG8=")
+    box = Toolbox(files)
+    assert box.call("decode", {"ops": "base64", "file": "m.txt", "data": ""}) == "hello"
+    assert box.call("decode", {"ops": "base64", "data": "aGk=", "file": "m.txt"}) == "hi"
+
+
+def test_xor_cle_avec_prefixe_0x():
+    from csaw_agent.tools import apply_op
+    assert apply_op("xor:0x01", b"\x00\x01") == b"\x01\x00"
+
+
+def test_outil_inconnu_liste_les_outils(tmp_path):
+    import pytest
+    from csaw_agent.tools import Toolbox, ToolError
+    with pytest.raises(ToolError, match="read_file"):
+        Toolbox(tmp_path).call("nc", {})
