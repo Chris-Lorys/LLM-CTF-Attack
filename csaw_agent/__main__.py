@@ -20,6 +20,7 @@ from .challenge import ChallengeError, ChallengeRef, discover
 from .llm import make_model
 from .report import write_report
 from .run import run_challenge
+from .sandbox import Sandbox, SandboxError
 from .trace import verify_trace
 
 
@@ -29,6 +30,14 @@ def _add_model_args(p: argparse.ArgumentParser) -> None:
                    "groq:llama-3.3-70b-versatile ; sans --model, pré-scan seul")
     p.add_argument("--base-url", help="URL d'un service compatible OpenAI (Kaggle, vLLM...)")
     p.add_argument("--max-steps", type=int, default=20)
+    p.add_argument("--shell", action="store_true",
+                   help="donner au LLM un shell en bac à sable (root requis, voir sandbox.py)")
+    p.add_argument("--sandbox-user", default="ctfsandbox")
+    p.add_argument("--protect", action="append", type=Path, default=[],
+                   help="chemin rendu illisible pour le shell (répétable) ; "
+                   "run-all y ajoute la base de challenges")
+    p.add_argument("--shell-avec-reseau", action="store_true",
+                   help="ne pas isoler le réseau du shell (déconseillé)")
 
 
 def _add_select_args(p: argparse.ArgumentParser) -> None:
@@ -48,7 +57,7 @@ def select(refs: list[ChallengeRef], categories: list[str] | None = None,
 
 def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
             categories: list[str] | None = None, only: list[str] | None = None,
-            skip_server: bool = False) -> list[dict]:
+            skip_server: bool = False, sandbox=None) -> list[dict]:
     """Lance l'agent sur chaque challenge de la base et écrit un bilan.
 
     Avec `skip_server`, les challenges qui demandent un service réseau (champ
@@ -62,7 +71,7 @@ def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
             summary = {"status": "ignore_serveur"}
         else:
             try:
-                summary = run_challenge(ref.json_path, runs_dir, model, max_steps)
+                summary = run_challenge(ref.json_path, runs_dir, model, max_steps, sandbox)
             except ChallengeError as exc:
                 summary = {"status": "erreur_challenge", "error": str(exc)}
         summary.update(id=ref.id, category_db=ref.category, challenge=str(ref.json_path))
@@ -107,14 +116,30 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in ("run", "run-all"):
         model = make_model(args.model, args.base_url) if args.model else None
+        sandbox = None
+        if args.shell:
+            protected = list(args.protect)
+            if args.command == "run-all":
+                base = args.root if args.root.is_dir() else args.root.parent
+                protected.append(base)
+            else:
+                protected.append(args.challenge_json.parent)
+            try:
+                sandbox = Sandbox(args.sandbox_user, protected,
+                                  isolate_network=not args.shell_avec_reseau)
+            except SandboxError as exc:
+                print(f"erreur : {exc}", file=sys.stderr)
+                return 2
+            print(f"shell en bac à sable : {sandbox.describe()}", file=sys.stderr)
         if args.command == "run-all":
             results = run_all(args.root, args.runs_dir, model, args.max_steps,
                               categories=args.categories, only=args.only,
-                              skip_server=args.skip_server)
+                              skip_server=args.skip_server, sandbox=sandbox)
             launched = [r for r in results if r["status"] != "ignore_serveur"]
             return 0 if launched and all(r["status"] == "resolu" for r in launched) else 1
         try:
-            summary = run_challenge(args.challenge_json, args.runs_dir, model, args.max_steps)
+            summary = run_challenge(args.challenge_json, args.runs_dir, model, args.max_steps,
+                                    sandbox)
         except ChallengeError as exc:
             print(f"erreur : {exc}", file=sys.stderr)
             return 2

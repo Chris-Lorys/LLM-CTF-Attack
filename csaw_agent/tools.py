@@ -68,8 +68,11 @@ class Tool:
 class Toolbox:
     """Outils liés à l'espace de travail d'un run."""
 
-    def __init__(self, files_dir: Path):
+    def __init__(self, files_dir: Path, sandbox=None):
         self.files_dir = Path(files_dir).resolve()
+        self.sandbox = sandbox
+        if sandbox is not None:
+            sandbox.attach(self.files_dir)
         self.tools: dict[str, Tool] = {}
         self._register()
 
@@ -148,10 +151,23 @@ class Toolbox:
             [Param("file", str, "nom de l'archive"),
              Param("password", str, "mot de passe d'un zip chiffré", False, "")],
             self.extract)
+        if self.sandbox is not None:
+            add("shell", "commande bash dans le dossier des fichiers, sans réseau, utilisateur "
+                "sans privilèges (file, strings, unzip, 7z, sqlite3, tshark, objdump, "
+                "python3...) ; les fichiers créés deviennent lisibles par les autres outils",
+                [Param("command", str, "la commande, p. ex. 'file *'"),
+                 Param("timeout", int, "délai en secondes (max 120)", False, 30)],
+                self.shell)
         add("check_flag", "vérifie un flag candidat ; répond seulement vrai ou faux",
             [Param("candidate", str, "le flag proposé")], _handled_by_agent)
         add("give_up", "abandonne le challenge en expliquant pourquoi",
             [Param("reason", str, "raison de l'abandon")], _handled_by_agent)
+
+    def shell(self, command: str, timeout: int) -> str:
+        if not command.strip():
+            raise ToolError("commande vide")
+        result = self.sandbox.run(command, timeout)
+        return f"[code de sortie : {result.returncode}]\n{result.output}"
 
     def list_files(self) -> str:
         rows = [f"{p.name}\t{p.stat().st_size} octets"

@@ -188,7 +188,8 @@ def load_challenge(json_path: Path, workspace: Path) -> tuple[Challenge, FlagVer
         name = _target_name(rel, taken)
         target = dest / name
         shutil.copyfile(src, target)
-        target.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+        # Lecture et exécution (binaires rev/pwn lancés dans le bac à sable), jamais écriture.
+        target.chmod(0o555)
         files.append(ChallengeFile(name, target, target.stat().st_size, _sha256(target)))
 
     known = {"name", "category", "description", "files", "flag", "server", "box",
