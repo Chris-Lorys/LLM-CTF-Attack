@@ -50,7 +50,7 @@ Format de réponse obligatoire : un seul objet JSON, sans texte autour.
 {{"categorie": "<catégorie>", "pensee": "<raisonnement bref>", "action": "<nom de l'outil>", "args": {{...}}}}
 """
 
-HISTORY_WINDOW = 16  # messages gardés après les deux premiers (contexte limité des petits modèles)
+HISTORY_WINDOW = 12  # messages gardés après les deux premiers (contexte limité des petits modèles)
 MAX_PARSE_ERRORS = 3
 
 
@@ -62,9 +62,22 @@ class AgentResult:
     category: str | None
 
 
+def _repair_json(text: str) -> str:
+    """Corrige deux fautes vues dans les traces des petits modèles.
+
+    - échappements \\xNN, invalides en JSON, réécrits en \\u00NN ;
+    - entiers hexadécimaux nus (\"offset\": 0x200), convertis en décimal.
+    """
+    text = re.sub(r"(?<!\\)((?:\\\\)*)\\x([0-9a-fA-F]{2})", r"\1\\u00\2", text)
+    return re.sub(r"(:\s*)0x([0-9a-fA-F]+)\b", lambda m: m.group(1) + str(int(m.group(2), 16)),
+                  text)
+
+
 def parse_action(text: str) -> dict:
     """Extrait le premier objet JSON de la réponse, même entouré de ``` ou de texte."""
-    text = re.sub(r"```(?:json)?", "", text)
+    if not text.strip():
+        raise ValueError("réponse vide")
+    text = _repair_json(re.sub(r"```(?:json)?", "", text))
     decoder = json.JSONDecoder()
     for match in re.finditer(r"\{", text):
         try:

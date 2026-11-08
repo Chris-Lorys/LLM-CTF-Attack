@@ -27,7 +27,7 @@ installer sur le PC et aucune clé d'API à fournir.
 | Étape | Détail |
 | --- | --- |
 | Paramètres | `MODEL`, `BRANCH`, `CHALLENGES` (`csaw` ou `demo`), `CATEGORIES`, `SKIP_SERVER`, `MAX_STEPS` : la seule cellule à modifier |
-| Ollama | installation, démarrage avec un contexte de 8 192 jetons, téléchargement du modèle |
+| Ollama | installation, démarrage avec un contexte de 16 384 jetons, téléchargement du modèle |
 | Agent | clonage du dépôt, exécution des tests |
 | Lancement | clone de la base CSAW 2026, puis `run-all <base>/dataset.json --skip-server --model ollama:<modèle>` |
 | Contrôle | `verify-trace` sur chaque trace, bilan, affichage d'un rapport |

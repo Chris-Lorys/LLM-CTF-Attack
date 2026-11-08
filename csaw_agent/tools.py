@@ -78,7 +78,8 @@ class Toolbox:
     def call(self, name: str, args: dict) -> str:
         tool = self.tools.get(name)
         if tool is None:
-            raise ToolError(f"outil inconnu : {name!r}")
+            raise ToolError(f"outil inconnu : {name!r}. Il n'y a pas de shell ; outils "
+                            f"disponibles : {', '.join(self.tools)}")
         if not isinstance(args, dict):
             raise ToolError("les arguments doivent être un objet JSON")
         unknown = set(args) - {p.name for p in tool.params}
@@ -108,9 +109,13 @@ class Toolbox:
         return path
 
     def _source(self, data: str, file: str) -> bytes:
-        if bool(data) == bool(file):
-            raise ToolError("donner exactement un des deux arguments : data ou file")
-        return self._file(file).read_bytes() if file else data.encode()
+        # Les petits modèles envoient souvent les deux arguments, l'un vide, ou les
+        # deux remplis : data, plus précis, l'emporte.
+        if data:
+            return data.encode()
+        if file:
+            return self._file(file).read_bytes()
+        raise ToolError("donner data (texte) ou file (nom de fichier)")
 
     # --- Outils -------------------------------------------------------------
 
@@ -185,7 +190,7 @@ class Toolbox:
     def xor_bruteforce(self, data: str, file: str) -> str:
         if data:
             try:
-                raw = bytes.fromhex(data)
+                raw = bytes.fromhex(_strip_hex(data))
             except ValueError as exc:
                 raise ToolError("data doit être de l'hexadécimal") from exc
         else:
@@ -294,13 +299,18 @@ def _rot(value: bytes, n: int) -> bytes:
     return bytes(out)
 
 
+def _strip_hex(text: str) -> str:
+    """Tolère les écritures courantes d'un hexadécimal : 0x18, 0x41 0x42, 41:42."""
+    return re.sub(r"0x|[\s:,]", "", text.strip(), flags=re.IGNORECASE)
+
+
 def apply_op(op: str, value: bytes) -> bytes:
     name, _, arg = op.partition(":")
     try:
         if name == "rot":
             return _rot(value, int(arg))
         if name == "xor":
-            key = bytes.fromhex(arg)
+            key = bytes.fromhex(_strip_hex(arg))
             if not key:
                 raise ToolError("xor:CLEHEX attend une clé non vide")
             return bytes(b ^ key[i % len(key)] for i, b in enumerate(value))
