@@ -223,3 +223,14 @@ def test_csaw_noms_en_double(tmp_path):
         {"name": "c", "files": ["a/x.bin", "b/x.bin"], "flag": "x{y}"}))
     challenge, _ = load_challenge(chal / "challenge.json", tmp_path / "ws")
     assert [f.name for f in challenge.files] == ["x.bin", "b_x.bin"]
+
+
+def test_rapport_avec_separateurs_unicode(tmp_path):
+    """Une sortie d'outil contenant \\x85, U+2028 ou \\x0b ne doit pas casser le rapport."""
+    from csaw_agent.report import build_report
+    trace = TraceWriter(tmp_path / "trace.jsonl")
+    trace.log("start", {"challenge_json": "x"})
+    trace.log("tool_result", {"tool": "strings", "output": "a\x85b c d\x0be\x1cf"})
+    trace.log("end", {"status": "non_resolu"})
+    assert verify_trace(trace.path)[0]
+    assert "Rapport" in build_report(trace.path)
