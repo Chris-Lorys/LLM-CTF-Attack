@@ -18,6 +18,7 @@ GENESIS = "0" * 64
 EVENT_TYPES = (
     "start",
     "ingestion",
+    "sandbox",
     "prompt",
     "llm_response",
     "tool_call",

@@ -37,6 +37,13 @@ def build_report(trace_path: Path) -> str:
     raw = trace_path.read_bytes()
     events = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip()]
 
+    def _sandbox_cell(box: dict) -> str:
+        if not box:
+            return "non"
+        net = "réseau coupé" if box.get("network_isolated") else "RÉSEAU NON ISOLÉ"
+        return _cell(f"oui ({box.get('user')}, {net}, "
+                     f"{len(box.get('protected', []))} chemin(s) protégé(s))")
+
     def first(kind):
         return next((e["payload"] for e in events if e["type"] == kind), {})
 
@@ -64,6 +71,7 @@ def build_report(trace_path: Path) -> str:
         f"| Actions du LLM | {end.get('llm_steps', 0)} |",
         f"| Vérifications de flag | {len(checks)} |",
         f"| Durée | {end.get('duration_s', '?')} s |",
+        f"| Shell en bac à sable | {_sandbox_cell(first('sandbox'))} |",
         "",
         "## Intégrité de la trace",
         "",

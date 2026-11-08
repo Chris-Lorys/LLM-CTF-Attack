@@ -18,7 +18,8 @@ un échec.
 | `csaw_agent/trace.py` | 7. Trace | Journal JSONL en ajout seul, chaîné par SHA-256, vérifiable |
 | `csaw_agent/untrusted.py` | Sécurité | Nettoie, tronque et encadre les données non fiables avant le LLM |
 | `csaw_agent/llm.py` | Modèle | Interface unique `complete(messages)` pour tout service compatible OpenAI |
-| `csaw_agent/tools.py` | 4. Outils | Outils typés et validés : `file_info`, `read_file`, `strings`, `decode`, `xor_bruteforce`, `extract` |
+| `csaw_agent/tools.py` | 4. Outils | Outils typés et validés : `file_info`, `read_file`, `strings`, `decode`, `xor_bruteforce`, `extract`, `shell` (option `--shell`) |
+| `csaw_agent/sandbox.py` | Sécurité | Bac à sable du shell : utilisateur sans privilèges, sans réseau, base de challenges illisible (vérifié au démarrage) |
 | `csaw_agent/agent.py` | 2-5. Type, stratégie, adaptation | Boucle : le LLM choisit une action en JSON, le code l'exécute |
 | `csaw_agent/run.py` | Orchestration | Un dossier par run, pré-scan sans LLM, puis boucle LLM si besoin |
 | `csaw_agent/report.py` | 7. Rapport | `rapport.md` tiré de la trace par du code : flag validé, intégrité, déroulement |
@@ -61,6 +62,9 @@ vérifier que la trace jointe est bien celle dont il est tiré.
 - Le flag attendu n'est jamais transmis au LLM, qui ne reçoit que le résultat vrai/faux de `check_flag`.
 - La description, les fichiers et les sorties d'outils sont encadrés comme données non fiables ;
   les outils refusent tout fichier hors de l'espace de travail du run.
+- Le shell (`--shell`) tourne sous un utilisateur sans privilèges, sans réseau, avec un délai
+  maximal ; le clone de la base, qui contient les solutions, lui est rendu illisible et l'agent
+  vérifie qu'il l'est avant de démarrer. Chaque commande et sa sortie vont dans la trace.
 - La trace est écrite par le code, jamais retouchée ; `verify-trace` détecte toute modification.
 - Les prompts ne contiennent aucune solution ni write-up. Les fichiers de solution rangés dans
   les dossiers de la base CSAW (`solution/`, `solve.py`, `writeup.md`, `flag.txt`) ne sont jamais
