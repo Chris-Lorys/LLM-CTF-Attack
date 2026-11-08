@@ -52,6 +52,7 @@ Format de réponse obligatoire : un seul objet JSON, sans texte autour.
 
 HISTORY_WINDOW = 12  # messages gardés après les deux premiers (contexte limité des petits modèles)
 MAX_PARSE_ERRORS = 3
+MAX_NOTES, MAX_NOTE = 10, 300
 RECENT_WINDOW = 4  # une action identique à l'une des 4 dernières n'est pas relancée
 
 
@@ -150,6 +151,7 @@ class Agent:
         self.tried: set[str] = set()
         # Dernières actions : un petit modèle relance souvent la même commande en boucle.
         self.recent: list[str] = []
+        self.notes: list[str] = []
 
     def _check(self, candidate: str, source: str) -> bool:
         self.tried.add(candidate)
@@ -158,9 +160,21 @@ class Agent:
         return ok
 
     def _window(self, messages: list[Message]) -> list[Message]:
-        if len(messages) <= 2 + HISTORY_WINDOW:
-            return messages
-        return messages[:2] + messages[-HISTORY_WINDOW:]
+        """Contexte envoyé au modèle : présentation, notes retenues, historique récent.
+
+        Mémoire de travail explicite : un petit modèle à contexte court oublie ce qu'il
+        a trouvé au début ; les notes, écrites par lui et gardées par le code, restent.
+        """
+        head, recent = messages[:2], messages[2:]
+        if len(recent) > HISTORY_WINDOW:
+            recent = recent[-HISTORY_WINDOW:]
+            if recent and recent[0]["role"] == "user":  # garder l'alternance assistant/user
+                recent = recent[1:]
+        if self.notes:
+            notes = "\n".join(f"- {n}" for n in self.notes)
+            head = [head[0], {"role": "user", "content": head[1]["content"]
+                              + "\n\nTes notes (faits établis plus tôt) :\n" + notes}]
+        return head + recent
 
     def solve(self, challenge: Challenge, already_tried: set[str] = frozenset()) -> AgentResult:
         self.tried |= set(already_tried)
@@ -211,6 +225,17 @@ class Agent:
                 if self._check(candidate, "llm"):
                     return AgentResult("resolu", candidate, step, category)
                 self._send(messages, f"check_flag : FAUX. {self._budget(step)}", step)
+                continue
+
+            if name == "note":
+                text = args.get("text") if isinstance(args, dict) else None
+                if not isinstance(text, str) or not text.strip():
+                    self._send(messages, "note attend {\"text\": \"...\"}.", step)
+                    continue
+                self.notes = (self.notes + [text.strip()[:MAX_NOTE]])[-MAX_NOTES:]
+                self.trace.log("decision", {"step": step, "note": text.strip()[:MAX_NOTE]})
+                self._send(messages, f"Note retenue ({len(self.notes)}/{MAX_NOTES}). "
+                           + self._budget(step), step)
                 continue
 
             if name == "give_up":

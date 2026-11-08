@@ -82,8 +82,10 @@ class Toolbox:
     def call(self, name: str, args: dict) -> str:
         tool = self.tools.get(name)
         if tool is None:
-            raise ToolError(f"outil inconnu : {name!r}. Il n'y a pas de shell ; outils "
-                            f"disponibles : {', '.join(self.tools)}")
+            hint = ("passe par l'outil shell pour les commandes Linux" if "shell" in self.tools
+                    else "il n'y a pas de shell")
+            raise ToolError(f"outil inconnu : {name!r} ; {hint}. Outils disponibles : "
+                            f"{', '.join(self.tools)}")
         if not isinstance(args, dict):
             raise ToolError("les arguments doivent être un objet JSON")
         unknown = set(args) - {p.name for p in tool.params}
@@ -168,6 +170,9 @@ class Toolbox:
                 self.shell)
         add("check_flag", "vérifie un flag candidat ; répond seulement vrai ou faux",
             [Param("candidate", str, "le flag proposé")], _handled_by_agent)
+        add("note", "retient un fait établi (clé, offset, indice) : les notes restent "
+            "visibles jusqu'à la fin, alors que l'historique ancien est effacé",
+            [Param("text", str, "le fait à retenir, en une phrase")], _handled_by_agent)
         add("give_up", "abandonne le challenge en expliquant pourquoi",
             [Param("reason", str, "raison de l'abandon")], _handled_by_agent)
 
