@@ -345,3 +345,29 @@ def test_action_repetee_non_relancee(tmp_path):
     events = [json.loads(l) for l in (tmp_path / "trace.jsonl").read_text().splitlines()]
     assert sum(e["type"] == "tool_result" for e in events) == 1
     assert any(e["payload"].get("repetition") for e in events if e["type"] == "decision")
+
+
+def test_note_reste_visible_apres_l_historique(tmp_path):
+    import json
+    from csaw_agent.agent import HISTORY_WINDOW, Agent
+    from csaw_agent.challenge import load_challenge
+    from csaw_agent.llm import ScriptedModel
+    from csaw_agent.trace import TraceWriter
+    challenge, verifier = load_challenge(FIXTURES / "demo-encode" / "challenge.json", tmp_path)
+    actions = [json.dumps({"action": "note", "args": {"text": "la clé est 0x42"}})]
+    actions += [json.dumps({"action": "read_file", "args": {"file": "message.txt", "offset": i}})
+                for i in range(HISTORY_WINDOW)]
+    actions.append(json.dumps({"action": "give_up", "args": {"reason": "x"}}))
+    seen = []
+
+    class Spy(ScriptedModel):
+        def complete(self, messages):
+            seen.append(messages)
+            return super().complete(messages)
+
+    Agent(Spy(actions), Toolbox(tmp_path / "files"), verifier,
+          TraceWriter(tmp_path / "t.jsonl"), 30).solve(challenge)
+    last = seen[-1]
+    assert "la clé est 0x42" in last[1]["content"]
+    assert len(last) <= 2 + HISTORY_WINDOW
+    assert all("la clé est 0x42" not in m["content"] for m in last[2:3] if m["role"] == "assistant")
