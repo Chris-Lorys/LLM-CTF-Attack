@@ -40,6 +40,7 @@ installer sur le PC et aucune clé d'API à fournir.
 | `qwen2.5:7b` | 5 Go | premier essai, rapide |
 | `qwen2.5:14b` | 9 Go | essai suivant, meilleur raisonnement, tient sur une T4 |
 | `qwen2.5-coder:14b` | 9 Go | à comparer sur les challenges rev et pwn |
+| `qwen2.5:32b` | 20 Go | réparti sur les 2 T4 (GPU T4 x2 obligatoire), environ 2 fois plus lent que le 14b |
 
 Pour tester ses propres challenges, les déposer dans un *Dataset* Kaggle (un dossier par challenge,
 avec son `challenge.json`), l'ajouter au notebook (*Add Input*) et mettre
