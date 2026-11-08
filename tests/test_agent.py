@@ -293,3 +293,55 @@ def test_outils_ne_suivent_pas_un_lien_vers_l_exterieur(tmp_path):
     (files / "a.zip__x.txt").symlink_to(tmp_path / "cible")  # lien pendant
     assert "déjà extrait" in box.call("extract", {"file": "a.zip"})
     assert not (tmp_path / "cible").exists()
+
+
+# --- Fautes relevées dans l'essai 2 (shell, qwen2.5:7b) ----------------------
+
+def test_parse_action_recupere_un_shell_aux_guillemets_non_echappes():
+    from csaw_agent.agent import parse_action
+    text = ('{"categorie": "forensics", "action": "shell", "args": {"command": '
+            '"tshark -r c.pcap -Y "ip.dst == 10.0.0.1" -T fields", "timeout": 20}}')
+    action = parse_action(text)
+    assert action["args"] == {"command": 'tshark -r c.pcap -Y "ip.dst == 10.0.0.1" -T fields',
+                              "timeout": 20}
+
+
+def test_noms_de_fichiers_sans_espaces(tmp_path):
+    import json
+    from csaw_agent.challenge import load_challenge
+    chal = tmp_path / "c"
+    chal.mkdir()
+    (chal / "12345678 (1).wav").write_bytes(b"RIFF")
+    (chal / "challenge.json").write_text(json.dumps(
+        {"name": "c", "files": ["12345678 (1).wav"], "flag": "x{y}"}))
+    challenge, _ = load_challenge(chal / "challenge.json", tmp_path / "ws")
+    assert challenge.files[0].name == "12345678_1_.wav"
+
+
+def test_extract_nom_trop_long_et_nom_d_origine(tmp_path):
+    from csaw_agent.tools import Toolbox
+    files = tmp_path / "files"
+    files.mkdir()
+    long_name = "d/" + "x" * 300 + ".bin"
+    (files / "a.zip").write_bytes(_zip({long_name: b"long", "capsule.json": b"{}"}))
+    box = Toolbox(files)
+    box.call("extract", {"file": "a.zip"})
+    assert all(len(p.name) < 255 for p in files.iterdir())
+    assert box.call("read_file", {"file": "capsule.json"}) == "{}"
+
+
+def test_action_repetee_non_relancee(tmp_path):
+    import json
+    from csaw_agent.agent import Agent
+    from csaw_agent.challenge import load_challenge
+    from csaw_agent.llm import ScriptedModel
+    from csaw_agent.tools import Toolbox
+    from csaw_agent.trace import TraceWriter
+    challenge, verifier = load_challenge(FIXTURES / "demo-encode" / "challenge.json", tmp_path)
+    same = json.dumps({"action": "list_files", "args": {}})
+    model = ScriptedModel([same, same, json.dumps({"action": "give_up", "args": {"reason": "x"}})])
+    trace = TraceWriter(tmp_path / "trace.jsonl")
+    Agent(model, Toolbox(tmp_path / "files"), verifier, trace, 5).solve(challenge)
+    events = [json.loads(l) for l in (tmp_path / "trace.jsonl").read_text().splitlines()]
+    assert sum(e["type"] == "tool_result" for e in events) == 1
+    assert any(e["payload"].get("repetition") for e in events if e["type"] == "decision")

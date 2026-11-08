@@ -52,6 +52,7 @@ Format de réponse obligatoire : un seul objet JSON, sans texte autour.
 
 HISTORY_WINDOW = 12  # messages gardés après les deux premiers (contexte limité des petits modèles)
 MAX_PARSE_ERRORS = 3
+RECENT_WINDOW = 4  # une action identique à l'une des 4 dernières n'est pas relancée
 
 
 @dataclass
@@ -89,7 +90,32 @@ def parse_action(text: str) -> dict:
                 raise ValueError("'action' doit être une chaîne")
             obj.setdefault("args", {})
             return obj
+    shell = _salvage_shell(text)
+    if shell is not None:
+        return shell
     raise ValueError("aucun objet JSON avec un champ 'action'")
+
+
+_SHELL_RE = re.compile(
+    r'"action"\s*:\s*"shell"\s*,\s*"args"\s*:\s*\{\s*"command"\s*:\s*"(?P<cmd>.*)"'
+    r'(?:\s*,\s*"timeout"\s*:\s*(?P<timeout>\d+))?\s*\}\s*\}?\s*$', re.DOTALL)
+
+
+def _salvage_shell(text: str) -> dict | None:
+    """Récupère un appel shell dont la commande contient des guillemets non échappés.
+
+    Cas fréquent dans l'essai 2 : tshark -Y "ip.dst == 10.0.0.1" placé tel quel
+    dans la chaîne JSON. On prend tout ce qui sépare "command": " du dernier
+    guillemet avant la fin de l'objet.
+    """
+    match = _SHELL_RE.search(text.strip())
+    if not match:
+        return None
+    command = match.group("cmd").replace('\\"', '"').replace("\\'", "'").replace("\\\\", "\\")
+    args: dict = {"command": command}
+    if match.group("timeout"):
+        args["timeout"] = int(match.group("timeout"))
+    return {"action": "shell", "args": args, "repare": True}
 
 
 def initial_message(challenge: Challenge) -> str:
@@ -122,6 +148,8 @@ class Agent:
         self.trace = trace
         self.max_steps = max_steps
         self.tried: set[str] = set()
+        # Dernières actions : un petit modèle relance souvent la même commande en boucle.
+        self.recent: list[str] = []
 
     def _check(self, candidate: str, source: str) -> bool:
         self.tried.add(candidate)
@@ -189,6 +217,15 @@ class Agent:
                 reason = args.get("reason") if isinstance(args, dict) else None
                 self.trace.log("decision", {"step": step, "stop": "abandon", "reason": reason})
                 return AgentResult("abandon", None, step, category)
+
+            key = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
+            if key in self.recent:
+                self.trace.log("decision", {"step": step, "repetition": name})
+                self._send(messages, "Tu as déjà exécuté exactement cette action : le résultat "
+                           "serait le même. Change d'outil, d'arguments ou d'hypothèse. "
+                           + self._budget(step), step)
+                continue
+            self.recent = (self.recent + [key])[-RECENT_WINDOW:]
 
             try:
                 output = self.toolbox.call(name, args)
