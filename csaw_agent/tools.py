@@ -88,7 +88,8 @@ class Toolbox:
             raise ToolError("les arguments doivent être un objet JSON")
         unknown = set(args) - {p.name for p in tool.params}
         if unknown:
-            raise ToolError(f"arguments inconnus pour {name} : {sorted(unknown)}")
+            raise ToolError(f"arguments inconnus pour {name} : {sorted(unknown)} ; "
+                            f"signature : {tool.signature()}")
         kwargs = {}
         for p in tool.params:
             if p.name not in args:
@@ -109,6 +110,12 @@ class Toolbox:
     def _file(self, name: str) -> Path:
         path = (self.files_dir / name).resolve()
         if path.parent != self.files_dir or not path.is_file():
+            # Le LLM cite souvent un fichier extrait par son nom d'origine
+            # (capsule.json au lieu de evidence.zip__capsule.json).
+            matches = [p for p in self.files_dir.iterdir()
+                       if p.name.endswith("__" + name) and p.is_file()] if "/" not in name else []
+            if len(matches) == 1 and matches[0].resolve().parent == self.files_dir:
+                return matches[0].resolve()
             raise ToolError(f"fichier inconnu : {name!r} (voir list_files)")
         return path
 
@@ -235,6 +242,9 @@ class Toolbox:
         rows = []
         for member, content in members:
             flat = re.sub(r"[^A-Za-z0-9_.-]+", "_", member.strip("/").replace("/", "__"))
+            if len(stem) + len(flat) > 180:  # limite de 255 octets par nom de fichier
+                digest = hashlib.sha256(member.encode()).hexdigest()[:10]
+                flat = f"{digest}_{flat[-120:]}"
             target = self.files_dir / f"{stem}__{flat}"
             # lexists : un lien symbolique posé par le shell ne doit pas être suivi
             # (l'extraction tourne en root, hors du bac à sable).

@@ -135,11 +135,18 @@ def _fill_placeholders(text: str, meta: dict) -> str:
     return text
 
 
+def _safe(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_") or "fichier"
+    return cleaned.lstrip(".") or "fichier"
+
+
 def _target_name(rel: str, taken: set[str]) -> str:
     """Nom à plat dans l'espace de travail : le nom de base, sinon le chemin aplati."""
-    name = Path(rel).name
+    # Noms sans espaces ni parenthèses : « 12345678 (1).wav » a fait échouer toutes
+    # les commandes shell de l'essai 2 (le LLM n'ajoute pas de guillemets).
+    name = _safe(Path(rel).name)
     if name in taken:
-        name = rel.replace("/", "_").replace("\\", "_")
+        name = _safe(rel.replace("/", "_").replace("\\", "_"))
     while name in taken:
         name = "_" + name
     taken.add(name)
