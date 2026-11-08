@@ -14,9 +14,13 @@ from __future__ import annotations
 import base64
 import codecs
 import hashlib
+import io
 import math
 import re
+import stat
+import tarfile
 import urllib.parse
+import zipfile
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +29,12 @@ from typing import Callable
 from .flag import FLAG_PATTERN
 
 MAX_OUTPUT = 4000
+
+# Limites de l'extraction d'archives (une archive de challenge est une donnée non fiable :
+# bombe de décompression, chemins piégés, liens symboliques).
+MAX_MEMBERS = 500
+MAX_MEMBER_SIZE = 64 << 20
+MAX_EXTRACTED = 256 << 20
 
 
 class ToolError(ValueError):
@@ -128,6 +138,11 @@ class Toolbox:
         add("xor_bruteforce", "essaie les 256 clés XOR d'un octet, garde les sorties lisibles",
             [Param("data", str, "données en hexadécimal", False, ""),
              Param("file", str, "ou nom du fichier", False, "")], self.xor_bruteforce)
+        add("extract", "extrait une archive zip ou tar(.gz/.bz2/.xz) ; les fichiers extraits "
+            "s'ajoutent à list_files sous le nom <archive>__<chemin>",
+            [Param("file", str, "nom de l'archive"),
+             Param("password", str, "mot de passe d'un zip chiffré", False, "")],
+            self.extract)
         add("check_flag", "vérifie un flag candidat ; répond seulement vrai ou faux",
             [Param("candidate", str, "le flag proposé")], _handled_by_agent)
         add("give_up", "abandonne le challenge en expliquant pourquoi",
@@ -183,6 +198,64 @@ class Toolbox:
             if FLAG_PATTERN.search(text) or printable > 0.95:
                 hits.append(f"clé 0x{key:02x} : {text[:200]!r}")
         return "\n".join(hits) or "aucune clé ne donne un texte lisible"
+
+
+    def extract(self, file: str, password: str) -> str:
+        path = self._file(file)
+        data = path.read_bytes()
+        try:
+            members = list(_read_archive(data, password))
+        except (zipfile.BadZipFile, tarfile.TarError, EOFError, OSError) as exc:
+            raise ToolError(f"archive illisible : {exc}") from exc
+        except RuntimeError as exc:  # zip chiffré sans le bon mot de passe
+            raise ToolError(f"archive protégée : {exc}") from exc
+        stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.name)
+        rows = []
+        for member, content in members:
+            flat = re.sub(r"[^A-Za-z0-9_.-]+", "_", member.strip("/").replace("/", "__"))
+            target = self.files_dir / f"{stem}__{flat}"
+            if target.exists():
+                rows.append(f"{target.name}\t(déjà extrait)")
+                continue
+            target.write_bytes(content)
+            target.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+            rows.append(f"{target.name}\t{len(content)} octets\t{guess_type(content[:4096])}")
+        return "\n".join(rows) or "(archive vide)"
+
+
+def _read_archive(data: bytes, password: str):
+    """Rend (chemin, contenu) pour chaque fichier ordinaire, avec des limites strictes.
+
+    Rien n'est écrit sur disque ici : les chemins de l'archive ne servent qu'à
+    nommer les fichiers, ce qui écarte les attaques par ../ ou par lien.
+    """
+    total = 0
+
+    def account(name: str, size: int) -> None:
+        nonlocal total
+        total += size
+        if size > MAX_MEMBER_SIZE or total > MAX_EXTRACTED:
+            raise ToolError(f"archive trop volumineuse une fois extraite ({name})")
+
+    if zipfile.is_zipfile(io.BytesIO(data)):
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            infos = [i for i in zf.infolist() if not i.is_dir()]
+            if len(infos) > MAX_MEMBERS:
+                raise ToolError(f"trop de fichiers dans l'archive ({len(infos)})")
+            for info in infos:
+                account(info.filename, info.file_size)
+                with zf.open(info, pwd=password.encode() or None) as fh:
+                    content = fh.read(MAX_MEMBER_SIZE + 1)
+                account(info.filename, max(0, len(content) - info.file_size))
+                yield info.filename, content
+        return
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tf:
+        infos = [m for m in tf.getmembers() if m.isfile()]
+        if len(infos) > MAX_MEMBERS:
+            raise ToolError(f"trop de fichiers dans l'archive ({len(infos)})")
+        for info in infos:
+            account(info.name, info.size)
+            yield info.name, tf.extractfile(info).read()
 
 
 def _handled_by_agent(**_) -> str:  # pragma: no cover - interceptés par la boucle

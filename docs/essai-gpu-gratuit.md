@@ -26,10 +26,10 @@ installer sur le PC et aucune clé d'API à fournir.
 
 | Étape | Détail |
 | --- | --- |
-| Paramètres | `MODEL`, `BRANCH`, `CHALLENGES_DIR`, `MAX_STEPS` : la seule cellule à modifier |
+| Paramètres | `MODEL`, `BRANCH`, `CHALLENGES` (`csaw` ou `demo`), `CATEGORIES`, `SKIP_SERVER`, `MAX_STEPS` : la seule cellule à modifier |
 | Ollama | installation, démarrage avec un contexte de 8 192 jetons, téléchargement du modèle |
 | Agent | clonage du dépôt, exécution des tests |
-| Lancement | `python -m csaw_agent run-all <dossier> --model ollama:<modèle>` |
+| Lancement | clone de la base CSAW 2026, puis `run-all <base>/dataset.json --skip-server --model ollama:<modèle>` |
 | Contrôle | `verify-trace` sur chaque trace, bilan, affichage d'un rapport |
 | Résultats | archive avec `trace.jsonl` et `rapport.md` par challenge, plus `bilan.json` |
 
@@ -43,7 +43,7 @@ installer sur le PC et aucune clé d'API à fournir.
 
 Pour tester ses propres challenges, les déposer dans un *Dataset* Kaggle (un dossier par challenge,
 avec son `challenge.json`), l'ajouter au notebook (*Add Input*) et mettre
-`CHALLENGES_DIR = "/kaggle/input/<nom-du-dataset>"`.
+modifier `CHALLENGES_DIR` dans la cellule de lancement : `"/kaggle/input/<nom-du-dataset>"`.
 
 ## Si quelque chose bloque
 

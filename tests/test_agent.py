@@ -164,3 +164,38 @@ def test_run_all_ecrit_un_bilan(tmp_path):
     assert len(results) == 4
     bilan = json.loads((tmp_path / "bilan.json").read_text())
     assert {r["status"] for r in bilan} == {"resolu", "non_resolu"}
+
+
+# --- Extraction d'archives -----------------------------------------------------
+
+def _zip(entries: dict[str, bytes]) -> bytes:
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_extract_zip_a_plat_et_sans_evasion(tmp_path):
+    from csaw_agent.tools import Toolbox
+    files = tmp_path / "files"
+    files.mkdir()
+    (files / "a.zip").write_bytes(_zip({"dir/note.txt": b"bonjour", "../../evil.txt": b"x"}))
+    box = Toolbox(files)
+    out = box.call("extract", {"file": "a.zip"})
+    assert "a.zip__dir__note.txt" in out
+    assert not (tmp_path / "evil.txt").exists()
+    assert box.call("read_file", {"file": "a.zip__dir__note.txt"}) == "bonjour"
+    assert "déjà extrait" in box.call("extract", {"file": "a.zip"})
+
+
+def test_extract_refuse_une_non_archive(tmp_path):
+    import pytest
+    from csaw_agent.tools import Toolbox, ToolError
+    files = tmp_path / "files"
+    files.mkdir()
+    (files / "t.txt").write_text("pas une archive")
+    with pytest.raises(ToolError):
+        Toolbox(files).call("extract", {"file": "t.txt"})
