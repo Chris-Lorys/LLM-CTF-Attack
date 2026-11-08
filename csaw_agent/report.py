@@ -40,7 +40,8 @@ def build_report(trace_path: Path) -> str:
     def _sandbox_cell(box: dict) -> str:
         if not box:
             return "non"
-        net = "réseau coupé" if box.get("network_isolated") else "RÉSEAU NON ISOLÉ"
+        net = (f"réseau coupé par {box.get('network_mode')}" if box.get("network_isolated")
+               else "RÉSEAU NON ISOLÉ")
         return _cell(f"oui ({box.get('user')}, {net}, "
                      f"{len(box.get('protected', []))} chemin(s) protégé(s))")
 
