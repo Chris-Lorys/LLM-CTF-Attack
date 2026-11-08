@@ -11,7 +11,9 @@ Défenses, de la plus forte à la plus faible :
    de la base CSAW, qui contient les solutions des organisateurs. Ce point est
    vérifié au démarrage : si un chemin protégé reste lisible, le shell refuse
    de démarrer.
-2. Pas de réseau (`unshare -n`, ou `unshare -rn` lancé par l'utilisateur dédié) : rien ne peut être téléchargé, y compris les
+2. Pas de réseau (`unshare -n`, ou `unshare -rn` lancé par l'utilisateur dédié, ou, si
+   le conteneur interdit les espaces de noms comme sur Kaggle, filtre seccomp qui
+   refuse la création de sockets réseau) : rien ne peut être téléchargé, y compris les
    solutions publiées en ligne. Si l'isolation réseau est impossible sur la
    machine, le shell refuse de démarrer, sauf option explicite, et la trace
    le dit.
@@ -25,7 +27,9 @@ Chaque commande et sa sortie sont écrites dans la trace par la boucle de l'agen
 
 from __future__ import annotations
 
+import ctypes
 import os
+import platform
 import pwd
 import re
 import shutil
@@ -43,6 +47,53 @@ _DENY = re.compile(
     r"|LLMAC|CSAW26|github\.com|writeup|write-up",
     re.IGNORECASE,
 )
+
+
+# --- Filtre seccomp : interdit les sockets réseau sans aucun privilège -----------
+#
+# Programme BPF chargé par le processus enfant juste avant exec ; il s'hérite et
+# ne peut plus être retiré. Il refuse (EACCES) socket() pour tout domaine autre
+# qu'AF_UNIX, io_uring (qui sait aussi ouvrir des sockets) et l'ABI x32.
+
+_AUDIT_ARCH_X86_64 = 0xC000003E
+_RET_ALLOW, _RET_KILL, _RET_EACCES = 0x7FFF0000, 0x80000000, 0x00050000 | 13
+_LD, _JEQ, _JGE, _RET = 0x20, 0x15, 0x35, 0x06
+_SYS_SOCKET, _SYS_IO_URING_SETUP, _X32 = 41, 425, 0x40000000
+_AF_UNIX = 1
+
+_FILTER = [
+    (_LD, 0, 0, 4),                         # 0 : architecture
+    (_JEQ, 1, 0, _AUDIT_ARCH_X86_64),       # 1 : x86-64 → 3
+    (_RET, 0, 0, _RET_KILL),                # 2 : autre architecture : tué
+    (_LD, 0, 0, 0),                         # 3 : numéro d'appel système
+    (_JGE, 6, 0, _X32),                     # 4 : ABI x32 → refus
+    (_JEQ, 5, 0, _SYS_IO_URING_SETUP),      # 5 : io_uring → refus
+    (_JEQ, 1, 0, _SYS_SOCKET),              # 6 : socket → 8
+    (_RET, 0, 0, _RET_ALLOW),               # 7 : le reste est permis
+    (_LD, 0, 0, 16),                        # 8 : premier argument (domaine)
+    (_JEQ, 0, 1, _AF_UNIX),                 # 9 : AF_UNIX → 10, sinon → 11
+    (_RET, 0, 0, _RET_ALLOW),               # 10
+    (_RET, 0, 0, _RET_EACCES),              # 11 : socket réseau refusée
+]
+
+
+class _SockFilter(ctypes.Structure):
+    _fields_ = [("code", ctypes.c_uint16), ("jt", ctypes.c_uint8),
+                ("jf", ctypes.c_uint8), ("k", ctypes.c_uint32)]
+
+
+class _SockFprog(ctypes.Structure):
+    _fields_ = [("len", ctypes.c_uint16), ("filter", ctypes.POINTER(_SockFilter))]
+
+
+def _install_seccomp() -> None:  # appelé dans l'enfant, entre fork et exec
+    libc = ctypes.CDLL(None, use_errno=True)
+    prog_array = (_SockFilter * len(_FILTER))(*[_SockFilter(*ins) for ins in _FILTER])
+    prog = _SockFprog(len(_FILTER), prog_array)
+    if libc.prctl(38, 1, 0, 0, 0) != 0:  # PR_SET_NO_NEW_PRIVS
+        raise OSError(ctypes.get_errno(), "PR_SET_NO_NEW_PRIVS")
+    if libc.prctl(22, 2, ctypes.byref(prog), 0, 0) != 0:  # PR_SET_SECCOMP, FILTER
+        raise OSError(ctypes.get_errno(), "PR_SET_SECCOMP")
 
 
 class SandboxError(RuntimeError):
@@ -84,10 +135,13 @@ class Sandbox:
                 self.net_mode = "root"
             elif self._probe(self._drop() + ["unshare", "-rn", "true"]):
                 self.net_mode = "userns"
+            elif self._seccomp_works():
+                self.net_mode = "seccomp"
         self.network_isolated = self.net_mode is not None
         if isolate_network and not self.network_isolated:
-            raise SandboxError("isolation réseau impossible (unshare -n) ; relancer avec "
-                               "l'isolation réseau désactivée, en connaissance de cause")
+            raise SandboxError("isolation réseau impossible (unshare -n, unshare -rn et "
+                               "seccomp refusés) ; relancer avec --shell-avec-reseau, "
+                               "en connaissance de cause")
         for path in self.protected:
             self._hide(path)
 
@@ -99,6 +153,23 @@ class Sandbox:
             return subprocess.run(cmd, capture_output=True, timeout=10).returncode == 0
         except (OSError, subprocess.SubprocessError):
             return False
+
+    @staticmethod
+    def _seccomp_works() -> bool:
+        """Vrai si le filtre se charge et bloque bien une socket réseau."""
+        if platform.machine() != "x86_64" or shutil.which("python3") is None:
+            return False
+        code = ("import socket\ntry:\n socket.socket()\nexcept PermissionError:\n"
+                " print('bloque')\nelse:\n print('ouvert')")
+        try:
+            out = subprocess.run(["python3", "-I", "-c", code], capture_output=True,
+                                 timeout=10, preexec_fn=_install_seccomp)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return out.stdout.strip() == b"bloque"
+
+    def _preexec(self):
+        return _install_seccomp if self.net_mode == "seccomp" else None
 
     def _drop(self) -> list[str]:
         return ["setpriv", f"--reuid={self.uid}", f"--regid={self.gid}", "--clear-groups",
@@ -116,7 +187,8 @@ class Sandbox:
         if not path.exists():
             return
         path.chmod(0o700 if path.is_dir() else 0o600)
-        check = subprocess.run(self._prefix() + ["test", "-r", str(path)], capture_output=True)
+        check = subprocess.run(self._prefix() + ["test", "-r", str(path)], capture_output=True,
+                               preexec_fn=self._preexec())
         if check.returncode == 0:
             raise SandboxError(f"chemin protégé encore lisible par {self.user} : {path}")
 
@@ -147,7 +219,7 @@ class Sandbox:
         proc = subprocess.Popen(
             self._prefix() + ["bash", "-c", command], cwd=self.workdir, env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            start_new_session=True)
+            start_new_session=True, preexec_fn=self._preexec())
         try:
             out, _ = proc.communicate(timeout=limit)
             timed_out = False

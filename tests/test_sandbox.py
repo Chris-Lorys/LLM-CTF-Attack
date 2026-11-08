@@ -58,8 +58,31 @@ def test_shell_ne_lit_pas_la_base(box):
     assert "Permission denied" in out
 
 
-def test_shell_sans_reseau(box):
+def test_shell_sans_reseau_quel_que_soit_le_mode(box):
     toolbox, _ = box
+    for mode in ("root", "userns", "seccomp"):
+        toolbox.sandbox.net_mode = mode
+        if mode != "seccomp" and "lo" not in toolbox.call(
+                "shell", {"command": "cat /proc/net/dev"}):
+            continue  # mode indisponible ici (p. ex. Kaggle) : couvert par le suivant
+        out = toolbox.call("shell", {"command": "python3 -I -c \"import socket\n"
+                                     "try:\n socket.create_connection(('1.1.1.1', 53), 3)\n"
+                                     "except OSError as e:\n print('BLOQUE', e)\""})
+        assert "BLOQUE" in out, (mode, out)
+
+
+def test_seccomp_bloque_les_sockets(box):
+    toolbox, base = box
+    toolbox.sandbox.net_mode = "seccomp"
+    out = toolbox.call("shell", {"command": "python3 -I -c \"import socket; socket.socket()\"; "
+                                 f"cat {base}/solution/solve.py; ls"})
+    assert "PermissionError" in out and "demo{fuite}" not in out and "data.txt" in out
+
+
+def test_shell_seule_interface_lo_en_mode_root(box):
+    toolbox, _ = box
+    if toolbox.sandbox.net_mode != "root":
+        pytest.skip("espace de noms réseau indisponible")
     # Dans l'espace de noms réseau du bac à sable, seule l'interface lo existe.
     out = toolbox.call("shell", {"command": "tail -n +3 /proc/net/dev | cut -d: -f1"})
     interfaces = out.split("\n", 1)[1].split()
@@ -86,6 +109,8 @@ def test_shell_garde_fou(box):
 def test_mode_userns_ne_lit_pas_la_base(box):
     """Repli utilisé quand root ne peut pas créer d'espace de noms réseau."""
     toolbox, base = box
+    if not toolbox.sandbox._probe(toolbox.sandbox._drop() + ["unshare", "-rn", "true"]):
+        pytest.skip("espaces de noms utilisateur interdits ici")
     toolbox.sandbox.net_mode = "userns"
     out = toolbox.call("shell", {"command": f"cat {base}/solution/solve.py; "
                                  "tail -n +3 /proc/net/dev | cut -d: -f1"})
@@ -96,3 +121,19 @@ def test_mode_userns_ne_lit_pas_la_base(box):
 def test_refuse_un_utilisateur_absent(tmp_path):
     with pytest.raises(SandboxError):
         Sandbox("utilisateur_qui_n_existe_pas", [])
+
+
+def test_repli_seccomp_quand_les_espaces_de_noms_sont_interdits(tmp_path, monkeypatch):
+    """Situation de Kaggle : unshare -n et unshare -rn sont refusés."""
+    monkeypatch.setattr(Sandbox, "_probe", staticmethod(lambda cmd: False))
+    tmp_path.chmod(0o755)
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "solve.py").write_text("demo{fuite}")
+    files = tmp_path / "files"
+    files.mkdir()
+    sandbox = Sandbox(USER, [base])
+    assert sandbox.net_mode == "seccomp" and sandbox.describe()["network_isolated"]
+    out = Toolbox(files, sandbox).call(
+        "shell", {"command": f"cat {base}/solve.py; python3 -I -c 'import socket; socket.socket()'"})
+    assert "demo{fuite}" not in out and "PermissionError" in out
