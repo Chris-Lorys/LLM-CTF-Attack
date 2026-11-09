@@ -6,18 +6,20 @@ name: essai csaw
 # (jamais écrite dans la trace), passée à l'agent via CSAW_API_KEY.
 #
 # Avant le premier lancement : Settings → Secrets and variables → Actions, ajouter
-# au moins GEMINI_API_KEY (clé créée sur https://aistudio.google.com/apikey). Pour le
-# routage multi-modèles, ajouter aussi les clés utiles : OPENROUTER_API_KEY, GROQ_API_KEY,
-# CEREBRAS_API_KEY, DEEPSEEK_API_KEY (les secrets absents restent vides, sans erreur).
+# au moins OPENROUTER_API_KEY (clé créée sur https://openrouter.ai/keys). Le modèle par
+# défaut openrouter:openrouter/free route automatiquement vers un modèle gratuit disponible,
+# ce qui évite les noms de modèles qui changent. Pour le routage multi-modèles ou d'autres
+# fournisseurs, ajouter aussi les clés utiles : GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY,
+# DEEPSEEK_API_KEY (les secrets absents restent vides, sans erreur).
 
 on:
   workflow_dispatch:
     inputs:
       model:
         description: "Modèle unique (préréglage:nom) ; ignoré si 'models' est rempli"
-        default: "gemini:gemini-3.8-flash"
+        default: "openrouter:openrouter/free"
       models:
-        description: "Routage par catégorie, p. ex. crypto=openrouter:deepseek/deepseek-r1:free,default=gemini:gemini-3.8-flash"
+        description: "Routage par catégorie, p. ex. crypto=openrouter:openrouter/free,default=openrouter:openrouter/free"
         default: ""
       categories:
         description: "Catégories séparées par un espace (vide = toutes)"
