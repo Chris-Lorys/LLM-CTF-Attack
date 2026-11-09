@@ -129,6 +129,10 @@ def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
         summary.update(id=ref.id, category_db=ref.category, challenge=str(ref.json_path))
         results.append(summary)
         print(f"{summary['status']:<20} {ref.category:<10} {ref.id}", flush=True)
+        # Rendre la cause visible dans les journaux (l'artefact n'est pas toujours
+        # accessible) : erreur de modèle, de serveur ou interne.
+        if summary["status"].startswith("erreur") and summary.get("error"):
+            print(f"  └─ {summary['error']}", file=sys.stderr, flush=True)
         _write_bilan(runs_dir, results)  # écrit après chaque challenge
     launched = [r for r in results if r["status"] != "ignore_serveur"]
     solved = sum(r["status"] == "resolu" for r in results)
