@@ -64,13 +64,42 @@ class AgentResult:
     category: str | None
 
 
-def _repair_json(text: str) -> str:
-    """Corrige deux fautes vues dans les traces des petits modèles.
+_VALID_ESCAPES = set('"\\/bfnrtu')
 
-    - échappements \\xNN, invalides en JSON, réécrits en \\u00NN ;
-    - entiers hexadécimaux nus (\"offset\": 0x200), convertis en décimal.
+
+def _fix_escapes(text: str) -> str:
+    """Rend valides les échappements inventés par le modèle.
+
+    \\xNN devient \\u00NN, \\' devient ', tout autre \\c invalide devient \\\\c
+    (antislash littéral, p. ex. dans une regex grep).
     """
-    text = re.sub(r"(?<!\\)((?:\\\\)*)\\x([0-9a-fA-F]{2})", r"\1\\u00\2", text)
+    out, i = [], 0
+    while i < len(text):
+        ch = text[i]
+        if ch != "\\" or i + 1 == len(text):
+            out.append(ch)
+            i += 1
+            continue
+        nxt = text[i + 1]
+        if nxt == "x" and re.fullmatch(r"[0-9a-fA-F]{2}", text[i + 2:i + 4]):
+            out.append("\\u00" + text[i + 2:i + 4])
+            i += 4
+        elif nxt == "'":
+            out.append("'")
+            i += 2
+        elif nxt in _VALID_ESCAPES:
+            out.append(text[i:i + 2])
+            i += 2
+        else:
+            out.append("\\\\" + nxt)
+            i += 2
+    return "".join(out)
+
+
+def _repair_json(text: str) -> str:
+    """Corrige les fautes vues dans les traces : échappements invalides
+    (\\xNN, \\', \\S...) et entiers hexadécimaux nus (\"offset\": 0x200)."""
+    text = _fix_escapes(text)
     return re.sub(r"(:\s*)0x([0-9a-fA-F]+)\b", lambda m: m.group(1) + str(int(m.group(2), 16)),
                   text)
 
@@ -79,6 +108,8 @@ def parse_action(text: str) -> dict:
     """Extrait le premier objet JSON de la réponse, même entouré de ``` ou de texte."""
     if not text.strip():
         raise ValueError("réponse vide")
+    # Modèles « à raisonnement » (qwen3, deepseek-r1) : on ignore le bloc <think>.
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     text = _repair_json(re.sub(r"```(?:json)?", "", text))
     decoder = json.JSONDecoder()
     for match in re.finditer(r"\{", text):

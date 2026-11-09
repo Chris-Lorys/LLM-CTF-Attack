@@ -371,3 +371,41 @@ def test_note_reste_visible_apres_l_historique(tmp_path):
     assert "la clé est 0x42" in last[1]["content"]
     assert len(last) <= 2 + HISTORY_WINDOW
     assert all("la clé est 0x42" not in m["content"] for m in last[2:3] if m["role"] == "assistant")
+
+
+# --- Fautes relevées dans l'essai 4 (qwen2.5:32b) ----------------------------
+
+def test_parse_action_echappements_invalides():
+    from csaw_agent.agent import parse_action
+    text = ('{"pensee": "La cha\\u00eene \\\'Zy81\\\' n\'est pas un flag", "action": "shell", '
+            '"args": {"command": "grep -P \'\\S+\\d\' f.txt"}}')
+    action = parse_action(text)
+    assert action["args"]["command"] == "grep -P '\\S+\\d' f.txt"
+    assert "'Zy81'" in action["pensee"]
+
+
+def test_parse_action_ignore_le_bloc_think():
+    from csaw_agent.agent import parse_action
+    text = '<think>{"action": "give_up"} non</think>{"action": "list_files", "args": {}}'
+    assert parse_action(text)["action"] == "list_files"
+
+
+def test_rot_sans_deux_points_et_xor_cle_texte():
+    assert apply_op("rot13", b"a") == b"n"
+    assert apply_op("rot1", b"a") == b"b"
+    assert apply_op("xor:AB", b"\x00\x00") == b"\xab\xab"
+    assert apply_op("xor:s4", b"\x00\x00") == b"s4"
+
+
+def test_write_file_puis_lecture(tmp_path):
+    files = tmp_path / "files"
+    files.mkdir()
+    (files / "orig.bin").write_bytes(b"x")
+    box = Toolbox(files)
+    assert "écrit" in box.call("write_file", {"name": "solve.py", "content": "print(1)\n"})
+    assert box.call("read_file", {"file": "solve.py"}) == "print(1)\n"
+    box.call("write_file", {"name": "solve.py", "content": "print(2)\n"})  # réécriture permise
+    with pytest.raises(ToolError):
+        box.call("write_file", {"name": "orig.bin", "content": "écrasé"})
+    with pytest.raises(ToolError):
+        box.call("write_file", {"name": "../evil", "content": "x"})

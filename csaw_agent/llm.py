@@ -38,6 +38,7 @@ PRESETS = {
     "vllm": "http://localhost:8000/v1",
     "groq": "https://api.groq.com/openai/v1",
     "openrouter": "https://openrouter.ai/api/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
 }
 
 
@@ -49,7 +50,7 @@ class OpenAICompatModel:
     base_url: str = PRESETS["ollama"]
     api_key: str | None = None
     temperature: float = 0.2
-    max_tokens: int = 1024
+    max_tokens: int = 2048  # 1024 coupait les scripts écrits par le modèle (essai 4)
     timeout: float = 300.0
 
     @property
