@@ -40,6 +40,8 @@ PRESETS = {
     "groq": "https://api.groq.com/openai/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "cerebras": "https://api.cerebras.ai/v1",
+    "deepseek": "https://api.deepseek.com/v1",
 }
 
 # Réglages propres aux offres gratuites des API : quotas par minute (on espace les
@@ -47,7 +49,9 @@ PRESETS = {
 PRESET_OPTIONS = {
     "gemini": {"min_interval": 7.0, "max_tokens": 8192},   # ~10 requêtes/min gratuites
     "groq": {"min_interval": 2.5},
-    "openrouter": {"min_interval": 3.5},
+    "openrouter": {"min_interval": 3.5, "max_tokens": 8192},  # deepseek-r1, kimi : raisonnement
+    "cerebras": {"min_interval": 2.5},
+    "deepseek": {"min_interval": 2.0, "max_tokens": 8192},
 }
 
 RETRY_STATUS = {429, 500, 502, 503, 504}
@@ -130,6 +134,21 @@ class ScriptedModel:
         return self._replies.pop(0)
 
 
+def _api_key(preset: str) -> str | None:
+    """Clé du fournisseur, pour pouvoir router entre plusieurs API à la fois.
+
+    Cherche, dans l'ordre : CSAW_API_KEY_<PRESET>, <PRESET>_API_KEY (p. ex.
+    GEMINI_API_KEY, OPENROUTER_API_KEY, les noms que donnent les fournisseurs),
+    puis CSAW_API_KEY (repli pour un seul fournisseur). Jamais écrite dans la trace.
+    """
+    up = preset.upper()
+    for name in (f"CSAW_API_KEY_{up}", f"{up}_API_KEY", "CSAW_API_KEY"):
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
+
+
 def make_model(spec: str, base_url: str | None = None) -> ChatModel:
     """Construit un modèle à partir de `preset:modele`, p. ex. `ollama:qwen2.5:3b`.
 
@@ -142,6 +161,57 @@ def make_model(spec: str, base_url: str | None = None) -> ChatModel:
         url = base_url or PRESETS[preset]
         options = PRESET_OPTIONS.get(preset, {})
     else:
-        model, url = spec, base_url or PRESETS["ollama"]
-    return OpenAICompatModel(model=model, base_url=url, api_key=os.environ.get("CSAW_API_KEY"),
-                             **options)
+        preset, model, url = "", spec, base_url or PRESETS["ollama"]
+    return OpenAICompatModel(model=model, base_url=url, api_key=_api_key(preset), **options)
+
+
+@dataclass
+class ModelRouter:
+    """Choisit un modèle selon la catégorie du challenge (routage multi-modèles).
+
+    Idée (document de stratégie) : un modèle fort en raisonnement pour la crypto
+    et le reverse, un modèle fort en code pour le pwn, un modèle rapide par
+    défaut. Chaque modèle est joignable en une ligne car tous parlent le même
+    protocole ; router ne coûte donc rien et tient dans les quotas gratuits.
+    """
+
+    routes: dict[str, ChatModel]
+    default: ChatModel
+
+    def for_category(self, category: str) -> ChatModel:
+        return self.routes.get(category, self.default)
+
+    @property
+    def name(self) -> str:
+        parts = [f"{cat}={m.name}" for cat, m in self.routes.items()]
+        return "routeur(" + ", ".join(parts + [f"default={self.default.name}"]) + ")"
+
+    def describe(self) -> dict:
+        return {"default": self.default.name,
+                "routes": {cat: m.name for cat, m in self.routes.items()}}
+
+
+def make_router(spec: str, base_url: str | None = None) -> ModelRouter:
+    """Construit un routeur depuis `cat=preset:modele,...,default=preset:modele`.
+
+    Exemple : `crypto=openrouter:deepseek/deepseek-r1:free,
+    pwn=openrouter:moonshotai/kimi-k2.6:free,default=gemini:gemini-2.5-flash`.
+    La clé `default` est obligatoire.
+    """
+    routes: dict[str, ChatModel] = {}
+    default = None
+    for pair in spec.split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        key, sep, model_spec = pair.partition("=")
+        if not sep or not model_spec.strip():
+            raise ValueError(f"routage invalide : {pair!r} (attendu catégorie=preset:modele)")
+        key = key.strip()
+        if key == "default":
+            default = make_model(model_spec.strip(), base_url)
+        else:
+            routes[key] = make_model(model_spec.strip(), base_url)
+    if default is None:
+        raise ValueError("le routage doit comporter une entrée default=...")
+    return ModelRouter(routes, default)

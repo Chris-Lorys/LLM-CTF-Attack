@@ -37,9 +37,11 @@ Tous les services ci-dessous parlent le même protocole ; seul l'argument `--mod
 | Ollama en local (développement, petit modèle) | `--model ollama:qwen2.5:3b` |
 | Ollama sur un GPU gratuit (Kaggle, Colab) | notebook clé en main : [docs/essai-gpu-gratuit.md](docs/essai-gpu-gratuit.md) |
 | Modèle servi par vLLM ailleurs | `--model <modèle> --base-url https://<serveur>/v1` |
-| Offre gratuite d'une API | `--model gemini:gemini-2.5-flash`, `groq:<modèle>` ou `openrouter:<modèle>`, clé dans `CSAW_API_KEY` |
+| Offre gratuite d'une API | `--model gemini:gemini-2.5-flash`, ou `openrouter:`, `groq:`, `cerebras:`, `deepseek:` |
+| Routage multi-modèles par catégorie | `--models "crypto=openrouter:deepseek/deepseek-r1:free,default=gemini:gemini-2.5-flash"` |
 
-La clé d'API n'est lue que dans la variable d'environnement et n'est jamais écrite dans la trace.
+La clé de chaque fournisseur est lue dans `<FOURNISSEUR>_API_KEY` (p. ex. `GEMINI_API_KEY`,
+`OPENROUTER_API_KEY`), avec repli sur `CSAW_API_KEY` ; jamais écrite dans la trace.
 
 ## Utilisation
 

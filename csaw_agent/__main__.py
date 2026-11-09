@@ -21,7 +21,7 @@ import json as _json
 
 from .challenge import ChallengeError, ChallengeRef, discover, server_target
 from .compose import ComposeError, challenge_server, docker_available
-from .llm import make_model
+from .llm import make_model, make_router
 from .report import write_report
 from .run import run_challenge
 from .sandbox import Sandbox, SandboxError
@@ -33,6 +33,11 @@ def _add_model_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--model", help="préréglage:modèle, p. ex. ollama:qwen2.5:3b, "
                    "groq:llama-3.3-70b-versatile ; sans --model, pré-scan seul")
     p.add_argument("--base-url", help="URL d'un service compatible OpenAI (Kaggle, vLLM...)")
+    p.add_argument("--models", help="routage multi-modèles par catégorie, p. ex. "
+                   "'crypto=openrouter:deepseek/deepseek-r1:free,"
+                   "pwn=openrouter:moonshotai/kimi-k2.6:free,default=gemini:gemini-2.5-flash' "
+                   "(remplace --model ; la clé de chaque fournisseur est lue dans "
+                   "<FOURNISSEUR>_API_KEY, p. ex. OPENROUTER_API_KEY, GEMINI_API_KEY)")
     p.add_argument("--max-steps", type=int, default=20)
     p.add_argument("--shell", action="store_true",
                    help="donner au LLM un shell en bac à sable (root requis, voir sandbox.py)")
@@ -76,7 +81,7 @@ def _challenge_target(json_path: Path):
 
 
 def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
-             *, skip_server: bool, docker: bool) -> dict:
+             *, skip_server: bool, docker: bool, router=None) -> dict:
     """Résout un challenge, en démarrant son conteneur si c'est un challenge à serveur."""
     if ref.needs_server:
         target = _challenge_target(ref.json_path)
@@ -86,14 +91,14 @@ def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
                 with challenge_server(compose, target) as local:
                     from .net import NetworkClient
                     return run_challenge(ref.json_path, runs_dir, model, max_steps,
-                                         sandbox, net=NetworkClient(local))
+                                         sandbox, net=NetworkClient(local), router=router)
             except ComposeError as exc:
                 return {"status": "erreur_serveur", "error": str(exc)}
         if skip_server:
             return {"status": "ignore_serveur"}
         # Ni Docker ni --skip-server : on tente sur les seuls fichiers fournis.
     try:
-        return run_challenge(ref.json_path, runs_dir, model, max_steps, sandbox)
+        return run_challenge(ref.json_path, runs_dir, model, max_steps, sandbox, router=router)
     except ChallengeError as exc:
         return {"status": "erreur_challenge", "error": str(exc)}
     except Exception as exc:  # un challenge qui plante ne doit pas arrêter le lot
@@ -103,13 +108,15 @@ def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
 
 def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
             categories: list[str] | None = None, only: list[str] | None = None,
-            skip_server: bool = False, sandbox=None, docker: bool = False) -> list[dict]:
+            skip_server: bool = False, sandbox=None, docker: bool = False, router=None) -> list[dict]:
     """Lance l'agent sur chaque challenge de la base et écrit un bilan.
 
     Les challenges à serveur (champ `compose` de la base CSAW) ne sont lancés
     que si `docker` est vrai : leur conteneur est alors démarré et l'agent reçoit
     un outil réseau (`http` ou `connect`) borné à ce service. Sans Docker, ou
     avec `skip_server`, ils sont notés `ignore_serveur`.
+
+    Avec `router`, le modèle est choisi par catégorie (routage multi-modèles).
     """
     results = []
     runs_dir = Path(runs_dir)
@@ -118,7 +125,7 @@ def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
         print("Docker demandé mais indisponible : challenges à serveur ignorés.", flush=True)
     for ref in select(discover(root), categories, only):
         summary = _run_one(ref, runs_dir, model, max_steps, sandbox,
-                           skip_server=skip_server, docker=docker_ok)
+                           skip_server=skip_server, docker=docker_ok, router=router)
         summary.update(id=ref.id, category_db=ref.category, challenge=str(ref.json_path))
         results.append(summary)
         print(f"{summary['status']:<20} {ref.category:<10} {ref.id}", flush=True)
@@ -169,7 +176,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command in ("run", "run-all"):
-        model = make_model(args.model, args.base_url) if args.model else None
+        router = None
+        model = None
+        try:
+            if args.models:
+                router = make_router(args.models, args.base_url)
+            elif args.model:
+                model = make_model(args.model, args.base_url)
+        except ValueError as exc:
+            print(f"erreur : {exc}", file=sys.stderr)
+            return 2
         sandbox = None
         if args.shell:
             protected = list(args.protect)
@@ -189,12 +205,12 @@ def main(argv: list[str] | None = None) -> int:
             results = run_all(args.root, args.runs_dir, model, args.max_steps,
                               categories=args.categories, only=args.only,
                               skip_server=args.skip_server, sandbox=sandbox,
-                              docker=args.docker)
+                              docker=args.docker, router=router)
             launched = [r for r in results if r["status"] != "ignore_serveur"]
             return 0 if launched and all(r["status"] == "resolu" for r in launched) else 1
         try:
             summary = run_challenge(args.challenge_json, args.runs_dir, model, args.max_steps,
-                                    sandbox)
+                                    sandbox, router=router)
         except ChallengeError as exc:
             print(f"erreur : {exc}", file=sys.stderr)
             return 2
