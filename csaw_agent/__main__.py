@@ -17,7 +17,10 @@ import sys
 import traceback
 from pathlib import Path
 
-from .challenge import ChallengeError, ChallengeRef, discover
+import json as _json
+
+from .challenge import ChallengeError, ChallengeRef, discover, server_target
+from .compose import ComposeError, challenge_server, docker_available
 from .llm import make_model
 from .report import write_report
 from .run import run_challenge
@@ -56,28 +59,66 @@ def select(refs: list[ChallengeRef], categories: list[str] | None = None,
     return refs
 
 
+def _compose_path(json_path: Path) -> Path | None:
+    for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
+        candidate = json_path.parent / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _challenge_target(json_path: Path):
+    try:
+        meta = _json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, _json.JSONDecodeError):
+        return None
+    return server_target(meta) if isinstance(meta, dict) else None
+
+
+def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
+             *, skip_server: bool, docker: bool) -> dict:
+    """Résout un challenge, en démarrant son conteneur si c'est un challenge à serveur."""
+    if ref.needs_server:
+        target = _challenge_target(ref.json_path)
+        compose = _compose_path(ref.json_path)
+        if docker and target is not None and compose is not None:
+            try:
+                with challenge_server(compose, target) as local:
+                    from .net import NetworkClient
+                    return run_challenge(ref.json_path, runs_dir, model, max_steps,
+                                         sandbox, net=NetworkClient(local))
+            except ComposeError as exc:
+                return {"status": "erreur_serveur", "error": str(exc)}
+        if skip_server:
+            return {"status": "ignore_serveur"}
+        # Ni Docker ni --skip-server : on tente sur les seuls fichiers fournis.
+    try:
+        return run_challenge(ref.json_path, runs_dir, model, max_steps, sandbox)
+    except ChallengeError as exc:
+        return {"status": "erreur_challenge", "error": str(exc)}
+    except Exception as exc:  # un challenge qui plante ne doit pas arrêter le lot
+        traceback.print_exc()
+        return {"status": "erreur_interne", "error": f"{type(exc).__name__}: {exc}"}
+
+
 def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
             categories: list[str] | None = None, only: list[str] | None = None,
-            skip_server: bool = False, sandbox=None) -> list[dict]:
+            skip_server: bool = False, sandbox=None, docker: bool = False) -> list[dict]:
     """Lance l'agent sur chaque challenge de la base et écrit un bilan.
 
-    Avec `skip_server`, les challenges qui demandent un service réseau (champ
-    `compose` de la base CSAW) sont notés `ignore_serveur` sans être lancés :
-    l'agent n'a pas encore d'outil réseau ni de conteneur pour les servir.
+    Les challenges à serveur (champ `compose` de la base CSAW) ne sont lancés
+    que si `docker` est vrai : leur conteneur est alors démarré et l'agent reçoit
+    un outil réseau (`http` ou `connect`) borné à ce service. Sans Docker, ou
+    avec `skip_server`, ils sont notés `ignore_serveur`.
     """
     results = []
     runs_dir = Path(runs_dir)
+    docker_ok = docker and docker_available()
+    if docker and not docker_ok:
+        print("Docker demandé mais indisponible : challenges à serveur ignorés.", flush=True)
     for ref in select(discover(root), categories, only):
-        if skip_server and ref.needs_server:
-            summary = {"status": "ignore_serveur"}
-        else:
-            try:
-                summary = run_challenge(ref.json_path, runs_dir, model, max_steps, sandbox)
-            except ChallengeError as exc:
-                summary = {"status": "erreur_challenge", "error": str(exc)}
-            except Exception as exc:  # un challenge qui plante ne doit pas arrêter le lot
-                traceback.print_exc()
-                summary = {"status": "erreur_interne", "error": f"{type(exc).__name__}: {exc}"}
+        summary = _run_one(ref, runs_dir, model, max_steps, sandbox,
+                           skip_server=skip_server, docker=docker_ok)
         summary.update(id=ref.id, category_db=ref.category, challenge=str(ref.json_path))
         results.append(summary)
         print(f"{summary['status']:<20} {ref.category:<10} {ref.id}", flush=True)
@@ -111,6 +152,9 @@ def main(argv: list[str] | None = None) -> int:
     _add_select_args(p_all)
     p_all.add_argument("--skip-server", action="store_true",
                        help="ne pas lancer les challenges qui demandent un serveur")
+    p_all.add_argument("--docker", action="store_true",
+                       help="démarrer le conteneur des challenges à serveur (Docker requis) "
+                       "et donner à l'agent un outil réseau borné à ce service")
 
     p_list = sub.add_parser("list", help="lister les challenges d'une base")
     p_list.add_argument("root", type=Path)
@@ -144,7 +188,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run-all":
             results = run_all(args.root, args.runs_dir, model, args.max_steps,
                               categories=args.categories, only=args.only,
-                              skip_server=args.skip_server, sandbox=sandbox)
+                              skip_server=args.skip_server, sandbox=sandbox,
+                              docker=args.docker)
             launched = [r for r in results if r["status"] != "ignore_serveur"]
             return 0 if launched and all(r["status"] == "resolu" for r in launched) else 1
         try:

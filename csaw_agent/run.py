@@ -55,7 +55,7 @@ def prescan(challenge: Challenge, verifier: FlagVerifier, trace: TraceWriter,
 
 def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
                   model: ChatModel | None = None, max_steps: int = 20,
-                  sandbox=None) -> dict:
+                  sandbox=None, net=None) -> dict:
     started = time.monotonic()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = Path(runs_dir) / _SAFE.sub("_", Path(json_path).parent.name) / stamp
@@ -75,7 +75,9 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
     if flag is None and model is not None:
         if sandbox is not None:
             trace.log("sandbox", sandbox.describe())
-        agent = Agent(model, Toolbox(run_dir / "files", sandbox), verifier, trace, max_steps)
+        if net is not None:
+            trace.log("network", net.target.describe())
+        agent = Agent(model, Toolbox(run_dir / "files", sandbox, net), verifier, trace, max_steps)
         result = agent.solve(challenge, tried)
         flag, category, steps = result.flag, result.category, result.steps
         status = result.status if result.status != "budget_epuise" else "non_resolu"

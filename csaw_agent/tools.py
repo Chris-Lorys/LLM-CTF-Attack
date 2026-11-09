@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from .flag import FLAG_PATTERN
+from .net import NetworkError as _NetworkError
 
 MAX_OUTPUT = 4000
 
@@ -69,9 +70,10 @@ class Tool:
 class Toolbox:
     """Outils liés à l'espace de travail d'un run."""
 
-    def __init__(self, files_dir: Path, sandbox=None):
+    def __init__(self, files_dir: Path, sandbox=None, net=None):
         self.files_dir = Path(files_dir).resolve()
         self.sandbox = sandbox
+        self.net = net
         self.written: set[str] = set()
         if sandbox is not None:
             sandbox.attach(self.files_dir)
@@ -169,6 +171,24 @@ class Toolbox:
                 [Param("command", str, "la commande, p. ex. 'file *'"),
                  Param("timeout", int, "délai en secondes (max 120)", False, 30)],
                 self.shell)
+        if self.net is not None:
+            if self.net.target.proto in ("http", "https"):
+                add("http", "requête HTTP vers le serveur du challenge (cookies de session "
+                    "gardés entre appels) ; ne vise que ce serveur",
+                    [Param("path", str, "chemin, p. ex. /login?id=1"),
+                     Param("method", str, "GET, POST...", False, "GET"),
+                     Param("body", str, "corps (POST)", False, ""),
+                     Param("headers", dict, "en-têtes supplémentaires", False, None),
+                     Param("follow", bool, "suivre les redirections", False, True)],
+                    self.http)
+            else:
+                add("connect", "envoie des octets au service TCP du challenge et lit la "
+                    "réponse ; connexion gardée ouverte ; \\n, \\xNN interprétés",
+                    [Param("data", str, "à envoyer (vide = juste lire)", False, ""),
+                     Param("recv", bool, "lire la réponse", False, True),
+                     Param("newline", bool, "ajouter un saut de ligne", False, True),
+                     Param("raw", bool, "ne pas interpréter les échappements", False, False)],
+                    self.connect)
         add("check_flag", "vérifie un flag candidat ; répond seulement vrai ou faux",
             [Param("candidate", str, "le flag proposé")], _handled_by_agent)
         add("write_file", "écrit un fichier texte (script, données) dans le dossier des "
@@ -186,6 +206,21 @@ class Toolbox:
             raise ToolError("commande vide")
         result = self.sandbox.run(command, timeout)
         return f"[code de sortie : {result.returncode}]\n{result.output}"
+
+    def http(self, path: str, method: str, body: str, headers, follow: bool) -> str:
+        if headers is not None and not all(isinstance(k, str) and isinstance(v, str)
+                                           for k, v in headers.items()):
+            raise ToolError("headers doit être un objet de chaînes")
+        try:
+            return self.net.request(method, path, body, headers, follow)
+        except _NetworkError as exc:
+            raise ToolError(str(exc)) from exc
+
+    def connect(self, data: str, recv: bool, newline: bool, raw: bool) -> str:
+        try:
+            return self.net.send(data, recv=recv, newline=newline, raw=raw)
+        except _NetworkError as exc:
+            raise ToolError(str(exc)) from exc
 
     def write_file(self, name: str, content: str) -> str:
         if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}", name):

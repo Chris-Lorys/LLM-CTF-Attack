@@ -150,7 +150,7 @@ def _salvage_shell(text: str) -> dict | None:
     return {"action": "shell", "args": args, "repare": True}
 
 
-def initial_message(challenge: Challenge) -> str:
+def initial_message(challenge: Challenge, has_net: bool = False) -> str:
     """Présentation du challenge. Le pré-examen des fichiers est fait par le code."""
     lines = [
         f"Challenge : {challenge.name}",
@@ -162,9 +162,13 @@ def initial_message(challenge: Challenge) -> str:
         lines.append(f"- {f.name} : {f.size} octets, {guess_type(f.path.read_bytes()[:4096])}")
     if not challenge.files:
         lines.append("- aucun")
-    if challenge.needs_server:
-        lines.append("Note : ce challenge a un service réseau, mais tu n'as pas encore d'outil "
-                     "pour t'y connecter. Tire le maximum des fichiers fournis.")
+    if challenge.needs_server and has_net:
+        tool = "http" if challenge.target and challenge.target.proto in ("http", "https") else "connect"
+        lines.append(f"Note : ce challenge a un service réseau. Utilise l'outil {tool} pour le "
+                     "joindre ; il ne vise que ce serveur, et c'est souvent là qu'est le flag.")
+    elif challenge.needs_server:
+        lines.append("Note : ce challenge a un service réseau, mais aucun outil réseau n'est "
+                     "actif ici. Tire le maximum des fichiers fournis.")
     lines.append("Description :")
     lines.append(wrap_untrusted(challenge.description, "description du challenge"))
     lines.append("Commence par ton plan et ta première action.")
@@ -212,7 +216,7 @@ class Agent:
         tools = "\n".join(f"- {t.signature()}" for t in self.toolbox.tools.values())
         messages: list[Message] = [
             {"role": "system", "content": SYSTEM_PROMPT.format(tools=tools)},
-            {"role": "user", "content": initial_message(challenge)},
+            {"role": "user", "content": initial_message(challenge, self.toolbox.net is not None)},
         ]
         self.trace.log("prompt", {"model": self.model.name, "messages": messages})
 

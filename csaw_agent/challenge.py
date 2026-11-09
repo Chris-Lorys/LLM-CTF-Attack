@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .flag import FlagVerifier
+from .net import ServerTarget
 
 # Catégories reconnues ; tout le reste est ramené à "misc".
 CATEGORIES = ("pwn", "web", "rev", "forensics", "crypto", "misc")
@@ -81,6 +82,7 @@ class Challenge:
     files: tuple[ChallengeFile, ...]
     server: str | None = None
     needs_server: bool = False
+    target: ServerTarget | None = None
     excluded: tuple[str, ...] = ()
     extra: dict = field(default_factory=dict)
 
@@ -122,6 +124,31 @@ def _server_from(meta: dict) -> str | None:
     if proto:
         return f"{proto} {address}"
     return address
+
+
+def server_target(meta: dict) -> ServerTarget | None:
+    """Construit la cible réseau unique du challenge, si c'en est un à serveur.
+
+    Reconnaît `box` + `internal_port` (+ `proto`) de la base CSAW 2026. Le port
+    interne sert de valeur par défaut ; le lanceur de conteneur le remplace par
+    le port réellement publié en local.
+    """
+    box = meta.get("box") or meta.get("host")
+    port = meta.get("internal_port") or meta.get("port")
+    if not box or not port:
+        return None
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return None
+    proto = str(meta.get("proto") or "").lower()
+    if proto == "https":
+        proto = "https"
+    elif proto in ("http",):
+        proto = "http"
+    else:
+        proto = "nc"  # nc, tcp, ou absent : TCP brut
+    return ServerTarget(proto=proto, host=str(box), port=port)
 
 
 def _fill_placeholders(text: str, meta: dict) -> str:
@@ -209,6 +236,7 @@ def load_challenge(json_path: Path, workspace: Path) -> tuple[Challenge, FlagVer
         files=tuple(files),
         server=server,
         needs_server=bool(meta.get("compose")) or server is not None,
+        target=server_target(meta),
         excluded=tuple(excluded),
         extra={k: v for k, v in meta.items() if k not in known},
     )
