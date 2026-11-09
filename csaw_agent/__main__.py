@@ -35,7 +35,7 @@ def _add_model_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--base-url", help="URL d'un service compatible OpenAI (Kaggle, vLLM...)")
     p.add_argument("--models", help="routage multi-modèles par catégorie, p. ex. "
                    "'crypto=openrouter:deepseek/deepseek-r1:free,"
-                   "pwn=openrouter:moonshotai/kimi-k2.6:free,default=gemini:gemini-2.5-flash' "
+                   "pwn=openrouter:moonshotai/kimi-k2.6:free,default=gemini:gemini-3.8-flash' "
                    "(remplace --model ; la clé de chaque fournisseur est lue dans "
                    "<FOURNISSEUR>_API_KEY, p. ex. OPENROUTER_API_KEY, GEMINI_API_KEY)")
     p.add_argument("--max-steps", type=int, default=20)

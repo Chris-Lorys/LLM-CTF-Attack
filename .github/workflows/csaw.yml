@@ -15,9 +15,9 @@ on:
     inputs:
       model:
         description: "Modèle unique (préréglage:nom) ; ignoré si 'models' est rempli"
-        default: "gemini:gemini-2.5-flash"
+        default: "gemini:gemini-3.8-flash"
       models:
-        description: "Routage par catégorie, p. ex. crypto=openrouter:deepseek/deepseek-r1:free,default=gemini:gemini-2.5-flash"
+        description: "Routage par catégorie, p. ex. crypto=openrouter:deepseek/deepseek-r1:free,default=gemini:gemini-3.8-flash"
         default: ""
       categories:
         description: "Catégories séparées par un espace (vide = toutes)"
