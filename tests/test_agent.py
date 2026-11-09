@@ -67,6 +67,47 @@ def test_make_model_presets():
     assert m.model == "qwen2.5:3b" and m.base_url.startswith("http://localhost:11434")
     m = make_model("mon-modele", "https://exemple.kaggle/v1")
     assert m.model == "mon-modele" and m.base_url == "https://exemple.kaggle/v1"
+    m = make_model("gemini:gemini-2.5-flash")
+    assert m.model == "gemini-2.5-flash" and "generativelanguage" in m.base_url
+    assert m.min_interval > 0 and m.max_tokens >= 8192
+
+
+def test_quota_depasse_nouvelle_tentative(monkeypatch):
+    """Un 429 (quota gratuit dépassé) déclenche une nouvelle tentative, pas un échec."""
+    import http.server
+    import threading
+
+    calls = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            calls.append(self.headers.get("Authorization"))
+            if len(calls) == 1:
+                self.send_response(429)
+                self.send_header("Retry-After", "0")
+                self.end_headers()
+                self.wfile.write(b"quota")
+                return
+            body = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("CSAW_API_KEY", "cle-de-test")
+    try:
+        m = make_model("gemini:modele", f"http://127.0.0.1:{server.server_port}/v1")
+        m.min_interval = 0
+        assert m.complete([{"role": "user", "content": "x"}]) == "ok"
+    finally:
+        server.shutdown()
+    assert calls == ["Bearer cle-de-test"] * 2
 
 
 # --- Boucle complète avec un modèle scripté ---------------------------------

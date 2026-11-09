@@ -37,7 +37,7 @@ Tous les services ci-dessous parlent le même protocole ; seul l'argument `--mod
 | Ollama en local (développement, petit modèle) | `--model ollama:qwen2.5:3b` |
 | Ollama sur un GPU gratuit (Kaggle, Colab) | notebook clé en main : [docs/essai-gpu-gratuit.md](docs/essai-gpu-gratuit.md) |
 | Modèle servi par vLLM ailleurs | `--model <modèle> --base-url https://<serveur>/v1` |
-| Offre gratuite d'une API | `--model groq:<modèle>` ou `--model openrouter:<modèle>`, clé dans `CSAW_API_KEY` |
+| Offre gratuite d'une API | `--model gemini:gemini-2.5-flash`, `groq:<modèle>` ou `openrouter:<modèle>`, clé dans `CSAW_API_KEY` |
 
 La clé d'API n'est lue que dans la variable d'environnement et n'est jamais écrite dans la trace.
 

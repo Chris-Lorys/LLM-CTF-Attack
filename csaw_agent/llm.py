@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -41,6 +42,16 @@ PRESETS = {
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
 }
 
+# Réglages propres aux offres gratuites des API : quotas par minute (on espace les
+# appels) et modèles « qui réfléchissent » dont la réflexion consomme max_tokens.
+PRESET_OPTIONS = {
+    "gemini": {"min_interval": 7.0, "max_tokens": 8192},   # ~10 requêtes/min gratuites
+    "groq": {"min_interval": 2.5},
+    "openrouter": {"min_interval": 3.5},
+}
+
+RETRY_STATUS = {429, 500, 502, 503, 504}
+
 
 @dataclass
 class OpenAICompatModel:
@@ -52,6 +63,9 @@ class OpenAICompatModel:
     temperature: float = 0.2
     max_tokens: int = 2048  # 1024 coupait les scripts écrits par le modèle (essai 4)
     timeout: float = 300.0
+    min_interval: float = 0.0   # secondes minimales entre deux appels (quota gratuit)
+    retries: int = 6            # nouvelles tentatives sur 429 / 5xx, délai croissant
+    _last_call: float = 0.0
 
     @property
     def name(self) -> str:
@@ -67,20 +81,37 @@ class OpenAICompatModel:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        request = urllib.request.Request(
-            self.base_url.rstrip("/") + "/chat/completions", data=body, headers=headers)
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                data = json.load(response)
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode(errors="replace")[:300]
-            raise LLMError(f"HTTP {exc.code} depuis {self.base_url} : {detail}") from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise LLMError(f"modèle injoignable ({self.base_url}) : {exc}") from exc
+        url = self.base_url.rstrip("/") + "/chat/completions"
+        for attempt in range(self.retries + 1):
+            wait = self.min_interval - (time.monotonic() - self._last_call)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_call = time.monotonic()
+            request = urllib.request.Request(url, data=body, headers=headers)
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    data = json.load(response)
+                break
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode(errors="replace")[:300]
+                if exc.code in RETRY_STATUS and attempt < self.retries:
+                    time.sleep(_retry_delay(exc.headers.get("Retry-After"), attempt))
+                    continue
+                raise LLMError(f"HTTP {exc.code} depuis {self.base_url} : {detail}") from exc
+            except (urllib.error.URLError, TimeoutError) as exc:
+                raise LLMError(f"modèle injoignable ({self.base_url}) : {exc}") from exc
         try:
             return data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError(f"réponse inattendue : {str(data)[:300]}") from exc
+
+
+def _retry_delay(retry_after: str | None, attempt: int) -> float:
+    """Délai avant une nouvelle tentative : celui demandé par le serveur, sinon croissant."""
+    try:
+        return min(float(retry_after), 120.0)
+    except (TypeError, ValueError):
+        return min(5.0 * 2 ** attempt, 120.0)
 
 
 class ScriptedModel:
@@ -106,8 +137,11 @@ def make_model(spec: str, base_url: str | None = None) -> ChatModel:
     (ou vaut l'URL d'Ollama par défaut).
     """
     preset, _, model = spec.partition(":")
+    options = {}
     if preset in PRESETS and model:
         url = base_url or PRESETS[preset]
+        options = PRESET_OPTIONS.get(preset, {})
     else:
         model, url = spec, base_url or PRESETS["ollama"]
-    return OpenAICompatModel(model=model, base_url=url, api_key=os.environ.get("CSAW_API_KEY"))
+    return OpenAICompatModel(model=model, base_url=url, api_key=os.environ.get("CSAW_API_KEY"),
+                             **options)
