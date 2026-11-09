@@ -144,8 +144,11 @@ def _api_key(preset: str) -> str | None:
     up = preset.upper()
     for name in (f"CSAW_API_KEY_{up}", f"{up}_API_KEY", "CSAW_API_KEY"):
         value = os.environ.get(name)
-        if value:
-            return value
+        if value and value.strip():
+            # Une clé collée dans un secret garde souvent un saut de ligne ou des
+            # espaces : collés dans l'en-tête Authorization, ils la rendent invalide
+            # (400 « Please pass a valid API key »).
+            return value.strip()
     return None
 
 

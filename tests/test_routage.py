@@ -31,6 +31,15 @@ def test_repli_sur_csaw_api_key(monkeypatch):
     assert _api_key("gemini") == "propre"
 
 
+def test_cle_nettoyee_des_espaces(monkeypatch):
+    # Une clé collée dans un secret garde souvent un \n final : il faut l'enlever,
+    # sinon l'en-tête Authorization est invalide (400 « valid API key »).
+    monkeypatch.setenv("GEMINI_API_KEY", "  ma-cle\n")
+    assert _api_key("gemini") == "ma-cle"
+    monkeypatch.setenv("GEMINI_API_KEY", "   ")  # que des espaces = pas de clé
+    assert _api_key("gemini") is None
+
+
 def test_routeur_choisit_par_categorie(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "or")
     monkeypatch.setenv("GEMINI_API_KEY", "gm")

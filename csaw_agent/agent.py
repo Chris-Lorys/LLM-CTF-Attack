@@ -62,6 +62,7 @@ class AgentResult:
     flag: str | None
     steps: int
     category: str | None
+    error: str | None = None  # détail d'une erreur de modèle, pour la trace et le bilan
 
 
 _VALID_ESCAPES = set('"\\/bfnrtu')
@@ -227,7 +228,7 @@ class Agent:
                 reply = self.model.complete(self._window(messages))
             except LLMError as exc:
                 self.trace.log("decision", {"step": step, "stop": "erreur_llm", "error": str(exc)})
-                return AgentResult("erreur_llm", None, step, category)
+                return AgentResult("erreur_llm", None, step, category, error=str(exc))
             self.trace.log("llm_response", {"step": step, "content": reply})
             messages.append({"role": "assistant", "content": reply})
 

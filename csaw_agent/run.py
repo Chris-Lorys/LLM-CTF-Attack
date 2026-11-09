@@ -75,7 +75,7 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
     tried: set[str] = set()
     flag = prescan(challenge, verifier, trace, tried)
     status = "resolu" if flag else "non_resolu"
-    category, steps = None, 0
+    category, steps, error = None, 0, None
 
     if flag is None and model is not None:
         if sandbox is not None:
@@ -84,7 +84,7 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
             trace.log("network", net.target.describe())
         agent = Agent(model, Toolbox(run_dir / "files", sandbox, net), verifier, trace, max_steps)
         result = agent.solve(challenge, tried)
-        flag, category, steps = result.flag, result.category, result.steps
+        flag, category, steps, error = result.flag, result.category, result.steps, result.error
         status = result.status if result.status != "budget_epuise" else "non_resolu"
 
     summary = {
@@ -97,6 +97,8 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
         "duration_s": round(time.monotonic() - started, 3),
         "run_dir": str(run_dir),
     }
+    if error:
+        summary["error"] = error
     trace.log("end", summary)
     # Le rapport est tiré de la trace une fois celle-ci close : il n'y ajoute rien.
     summary["report"] = str(write_report(trace.path))
