@@ -19,6 +19,7 @@ EVENT_TYPES = (
     "start",
     "ingestion",
     "sandbox",
+    "network",
     "prompt",
     "llm_response",
     "tool_call",

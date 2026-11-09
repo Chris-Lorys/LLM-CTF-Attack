@@ -1,9 +1,27 @@
 # Premier essai sur GPU gratuit
 
-Le PC de développement n'a pas de GPU dédié. Les vrais essais tournent donc sur un GPU gratuit,
-avec un modèle ouvert servi par Ollama. Tout est dans le notebook
+Le PC de développement n'a pas de GPU dédié. Les vrais essais tournent donc sur Kaggle ou Colab,
+soit avec l'API Gemini gratuite, soit avec un modèle ouvert servi par Ollama sur le GPU gratuit. Tout est dans le notebook
 [`notebooks/essai_gpu_gratuit.ipynb`](../notebooks/essai_gpu_gratuit.ipynb) : il n'y a rien à
-installer sur le PC et aucune clé d'API à fournir.
+installer sur le PC.
+
+## Avec l'API Gemini gratuite (réglage par défaut)
+
+Par défaut, `MODEL = "gemini:gemini-2.5-flash"`. C'est un modèle de pointe, gratuit dans la limite d'un
+quota par minute et par jour. L'agent espace ses appels d'environ 7 s. Si le serveur répond 429
+(quota dépassé), il attend puis réessaie. Quand le quota du jour est épuisé, les challenges restants
+finissent en `erreur_llm`, mais le bilan est quand même écrit. Il suffit de relancer le lendemain avec
+`CATEGORIES` restreint.
+
+1. Créer une clé sur https://aistudio.google.com/apikey (compte Google, sans carte bancaire).
+2. Kaggle : *Add-ons* → *Secrets* → *Add secret*, nom `GEMINI_API_KEY`, valeur = la clé, puis cocher
+   la case du notebook. Colab : icône 🔑, même nom, activer « Accès au notebook ».
+3. Pas besoin de GPU : *Accelerator* peut rester sur *None*. Il faut seulement *Internet* = **On**.
+
+La clé passe uniquement par la variable d'environnement `CSAW_API_KEY` du processus de l'agent. Elle
+n'apparaît ni dans la trace, ni dans les résultats, ni dans le shell en bac à sable (environnement vidé).
+
+Pour revenir au modèle local, mettre `MODEL = "ollama:qwen2.5:32b"` et choisir le GPU T4 x2.
 
 ## Kaggle (recommandé : 30 h de GPU par semaine)
 
@@ -27,9 +45,9 @@ installer sur le PC et aucune clé d'API à fournir.
 | Étape | Détail |
 | --- | --- |
 | Paramètres | `MODEL`, `BRANCH`, `CHALLENGES` (`csaw` ou `demo`), `CATEGORIES`, `SKIP_SERVER`, `MAX_STEPS` : la seule cellule à modifier |
-| Ollama | installation, démarrage avec un contexte de 16 384 jetons, téléchargement du modèle |
+| Modèle | clé `GEMINI_API_KEY` lue dans les secrets, ou, pour `ollama:`, installation d'Ollama, démarrage avec un contexte de 16 384 jetons, téléchargement du modèle |
 | Agent | clonage du dépôt, exécution des tests |
-| Lancement | clone de la base CSAW 2026, puis `run-all <base>/dataset.json --skip-server --model ollama:<modèle>` |
+| Lancement | clone de la base CSAW 2026, puis `run-all <base>/dataset.json --skip-server --model <MODEL>` |
 | Contrôle | `verify-trace` sur chaque trace, bilan, affichage d'un rapport |
 | Résultats | archive avec `trace.jsonl` et `rapport.md` par challenge, plus `bilan.json` |
 

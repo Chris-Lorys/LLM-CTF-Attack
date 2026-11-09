@@ -1,0 +1,103 @@
+name: essai csaw
+
+# Lancement manuel de l'agent sur la base CSAW 2026. Gratuit sur un dépôt public.
+# GitHub Actions fournit Docker : c'est ce qui permet de jouer les 12 challenges
+# à serveur, impossibles sur Kaggle ou Colab. La clé du modèle vient d'un secret
+# (jamais écrite dans la trace), passée à l'agent via CSAW_API_KEY.
+#
+# Avant le premier lancement : Settings → Secrets and variables → Actions, ajouter
+# au moins GEMINI_API_KEY (clé créée sur https://aistudio.google.com/apikey). Pour le
+# routage multi-modèles, ajouter aussi les clés utiles : OPENROUTER_API_KEY, GROQ_API_KEY,
+# CEREBRAS_API_KEY, DEEPSEEK_API_KEY (les secrets absents restent vides, sans erreur).
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Modèle unique (préréglage:nom) ; ignoré si 'models' est rempli"
+        default: "gemini:gemini-2.5-flash"
+      models:
+        description: "Routage par catégorie, p. ex. crypto=openrouter:deepseek/deepseek-r1:free,default=gemini:gemini-2.5-flash"
+        default: ""
+      categories:
+        description: "Catégories séparées par un espace (vide = toutes)"
+        default: ""
+      only:
+        description: "Identifiants de challenge séparés par un espace (vide = tous)"
+        default: ""
+      max_steps:
+        description: "Budget d'actions par challenge"
+        default: "40"
+      docker:
+        description: "Démarrer les conteneurs des challenges à serveur"
+        type: boolean
+        default: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Outils d'analyse et utilisateur du bac à sable
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \
+            file binutils p7zip-full unzip sqlite3 tshark xxd libimage-exiftool-perl sox
+          pip install pytest pycryptodome scapy pyyaml
+          id ctfsandbox || sudo useradd -M -s /bin/bash ctfsandbox
+
+      - name: Cloner la base CSAW 2026
+        run: git clone --depth 1 https://github.com/NYU-LLM-CTF/CSAW26_LLMAC_DB.git
+
+      - name: Préparer les options
+        id: opts
+        run: |
+          opts=""
+          for c in ${{ inputs.categories }}; do opts="$opts --category $c"; done
+          for o in ${{ inputs.only }}; do opts="$opts --only $o"; done
+          if [ "${{ inputs.docker }}" = "true" ]; then opts="$opts --docker"; fi
+          # Routage multi-modèles si 'models' est rempli, sinon modèle unique.
+          if [ -n "${{ inputs.models }}" ]; then
+            opts="$opts --models ${{ inputs.models }}"
+          else
+            opts="$opts --model ${{ inputs.model }}"
+          fi
+          echo "opts=$opts" >> "$GITHUB_OUTPUT"
+
+      - name: Lancer l'agent
+        env:
+          # Une clé par fournisseur (secrets du dépôt). Le routage peut en utiliser
+          # plusieurs ; un modèle unique n'a besoin que de la clé correspondante.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          # root pour le bac à sable (setpriv vers ctfsandbox) ; -E garde les clés.
+          sudo -E env "PATH=$PATH" \
+            GEMINI_API_KEY="$GEMINI_API_KEY" OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
+            GROQ_API_KEY="$GROQ_API_KEY" CEREBRAS_API_KEY="$CEREBRAS_API_KEY" \
+            DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+            python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json \
+              --max-steps ${{ inputs.max_steps }} \
+              --runs-dir runs --shell ${{ steps.opts.outputs.opts }}
+
+      - name: Résumé
+        if: always()
+        run: |
+          sudo chown -R "$USER" runs || true
+          test -f runs/bilan.json && python -c "import json;[print(f\"{r['status']:<18} {r.get('id')}\") for r in json.load(open('runs/bilan.json'))]" || echo "pas de bilan"
+
+      - name: Publier les traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runs
+          path: runs/

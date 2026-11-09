@@ -67,6 +67,47 @@ def test_make_model_presets():
     assert m.model == "qwen2.5:3b" and m.base_url.startswith("http://localhost:11434")
     m = make_model("mon-modele", "https://exemple.kaggle/v1")
     assert m.model == "mon-modele" and m.base_url == "https://exemple.kaggle/v1"
+    m = make_model("gemini:gemini-2.5-flash")
+    assert m.model == "gemini-2.5-flash" and "generativelanguage" in m.base_url
+    assert m.min_interval > 0 and m.max_tokens >= 8192
+
+
+def test_quota_depasse_nouvelle_tentative(monkeypatch):
+    """Un 429 (quota gratuit dépassé) déclenche une nouvelle tentative, pas un échec."""
+    import http.server
+    import threading
+
+    calls = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            calls.append(self.headers.get("Authorization"))
+            if len(calls) == 1:
+                self.send_response(429)
+                self.send_header("Retry-After", "0")
+                self.end_headers()
+                self.wfile.write(b"quota")
+                return
+            body = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("CSAW_API_KEY", "cle-de-test")
+    try:
+        m = make_model("gemini:modele", f"http://127.0.0.1:{server.server_port}/v1")
+        m.min_interval = 0
+        assert m.complete([{"role": "user", "content": "x"}]) == "ok"
+    finally:
+        server.shutdown()
+    assert calls == ["Bearer cle-de-test"] * 2
 
 
 # --- Boucle complète avec un modèle scripté ---------------------------------
@@ -371,3 +412,41 @@ def test_note_reste_visible_apres_l_historique(tmp_path):
     assert "la clé est 0x42" in last[1]["content"]
     assert len(last) <= 2 + HISTORY_WINDOW
     assert all("la clé est 0x42" not in m["content"] for m in last[2:3] if m["role"] == "assistant")
+
+
+# --- Fautes relevées dans l'essai 4 (qwen2.5:32b) ----------------------------
+
+def test_parse_action_echappements_invalides():
+    from csaw_agent.agent import parse_action
+    text = ('{"pensee": "La cha\\u00eene \\\'Zy81\\\' n\'est pas un flag", "action": "shell", '
+            '"args": {"command": "grep -P \'\\S+\\d\' f.txt"}}')
+    action = parse_action(text)
+    assert action["args"]["command"] == "grep -P '\\S+\\d' f.txt"
+    assert "'Zy81'" in action["pensee"]
+
+
+def test_parse_action_ignore_le_bloc_think():
+    from csaw_agent.agent import parse_action
+    text = '<think>{"action": "give_up"} non</think>{"action": "list_files", "args": {}}'
+    assert parse_action(text)["action"] == "list_files"
+
+
+def test_rot_sans_deux_points_et_xor_cle_texte():
+    assert apply_op("rot13", b"a") == b"n"
+    assert apply_op("rot1", b"a") == b"b"
+    assert apply_op("xor:AB", b"\x00\x00") == b"\xab\xab"
+    assert apply_op("xor:s4", b"\x00\x00") == b"s4"
+
+
+def test_write_file_puis_lecture(tmp_path):
+    files = tmp_path / "files"
+    files.mkdir()
+    (files / "orig.bin").write_bytes(b"x")
+    box = Toolbox(files)
+    assert "écrit" in box.call("write_file", {"name": "solve.py", "content": "print(1)\n"})
+    assert box.call("read_file", {"file": "solve.py"}) == "print(1)\n"
+    box.call("write_file", {"name": "solve.py", "content": "print(2)\n"})  # réécriture permise
+    with pytest.raises(ToolError):
+        box.call("write_file", {"name": "orig.bin", "content": "écrasé"})
+    with pytest.raises(ToolError):
+        box.call("write_file", {"name": "../evil", "content": "x"})

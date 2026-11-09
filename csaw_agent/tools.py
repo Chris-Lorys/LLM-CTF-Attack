@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from .flag import FLAG_PATTERN
+from .net import NetworkError as _NetworkError
 
 MAX_OUTPUT = 4000
 
@@ -69,9 +70,11 @@ class Tool:
 class Toolbox:
     """Outils liés à l'espace de travail d'un run."""
 
-    def __init__(self, files_dir: Path, sandbox=None):
+    def __init__(self, files_dir: Path, sandbox=None, net=None):
         self.files_dir = Path(files_dir).resolve()
         self.sandbox = sandbox
+        self.net = net
+        self.written: set[str] = set()
         if sandbox is not None:
             sandbox.attach(self.files_dir)
         self.tools: dict[str, Tool] = {}
@@ -168,8 +171,30 @@ class Toolbox:
                 [Param("command", str, "la commande, p. ex. 'file *'"),
                  Param("timeout", int, "délai en secondes (max 120)", False, 30)],
                 self.shell)
+        if self.net is not None:
+            if self.net.target.proto in ("http", "https"):
+                add("http", "requête HTTP vers le serveur du challenge (cookies de session "
+                    "gardés entre appels) ; ne vise que ce serveur",
+                    [Param("path", str, "chemin, p. ex. /login?id=1"),
+                     Param("method", str, "GET, POST...", False, "GET"),
+                     Param("body", str, "corps (POST)", False, ""),
+                     Param("headers", dict, "en-têtes supplémentaires", False, None),
+                     Param("follow", bool, "suivre les redirections", False, True)],
+                    self.http)
+            else:
+                add("connect", "envoie des octets au service TCP du challenge et lit la "
+                    "réponse ; connexion gardée ouverte ; \\n, \\xNN interprétés",
+                    [Param("data", str, "à envoyer (vide = juste lire)", False, ""),
+                     Param("recv", bool, "lire la réponse", False, True),
+                     Param("newline", bool, "ajouter un saut de ligne", False, True),
+                     Param("raw", bool, "ne pas interpréter les échappements", False, False)],
+                    self.connect)
         add("check_flag", "vérifie un flag candidat ; répond seulement vrai ou faux",
             [Param("candidate", str, "le flag proposé")], _handled_by_agent)
+        add("write_file", "écrit un fichier texte (script, données) dans le dossier des "
+            "fichiers ; pratique pour un script python lancé ensuite par shell",
+            [Param("name", str, "nom du fichier, p. ex. solve.py"),
+             Param("content", str, "contenu du fichier")], self.write_file)
         add("note", "retient un fait établi (clé, offset, indice) : les notes restent "
             "visibles jusqu'à la fin, alors que l'historique ancien est effacé",
             [Param("text", str, "le fait à retenir, en une phrase")], _handled_by_agent)
@@ -181,6 +206,37 @@ class Toolbox:
             raise ToolError("commande vide")
         result = self.sandbox.run(command, timeout)
         return f"[code de sortie : {result.returncode}]\n{result.output}"
+
+    def http(self, path: str, method: str, body: str, headers, follow: bool) -> str:
+        if headers is not None and not all(isinstance(k, str) and isinstance(v, str)
+                                           for k, v in headers.items()):
+            raise ToolError("headers doit être un objet de chaînes")
+        try:
+            return self.net.request(method, path, body, headers, follow)
+        except _NetworkError as exc:
+            raise ToolError(str(exc)) from exc
+
+    def connect(self, data: str, recv: bool, newline: bool, raw: bool) -> str:
+        try:
+            return self.net.send(data, recv=recv, newline=newline, raw=raw)
+        except _NetworkError as exc:
+            raise ToolError(str(exc)) from exc
+
+    def write_file(self, name: str, content: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}", name):
+            raise ToolError("nom de fichier invalide (lettres, chiffres, . _ - seulement)")
+        if len(content) > 65536:
+            raise ToolError("contenu trop long (64 Ko maximum)")
+        target = self.files_dir / name
+        if os.path.lexists(target):
+            if name not in self.written:
+                raise ToolError(f"{name} existe déjà et n'a pas été écrit par write_file")
+            target.unlink()
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        self.written.add(name)
+        return f"{name} écrit ({len(content.encode())} octets)"
 
     def list_files(self) -> str:
         rows = [f"{p.name}\t{p.stat().st_size} octets"
@@ -240,7 +296,10 @@ class Toolbox:
         try:
             members = list(_read_archive(data, password))
         except (zipfile.BadZipFile, tarfile.TarError, EOFError, OSError) as exc:
-            raise ToolError(f"archive illisible : {exc}") from exc
+            if guess_type(data[:16]) in ("archive 7z", "archive RAR"):
+                raise ToolError("extract ne lit que zip et tar ; pour 7z ou RAR, utilise "
+                                f"shell : 7z x {path.name} (option -pMOTDEPASSE)") from exc
+            raise ToolError(f"archive illisible : {str(exc).splitlines()[0]}") from exc
         except RuntimeError as exc:  # zip chiffré sans le bon mot de passe
             raise ToolError(f"archive protégée : {exc}") from exc
         stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.name)
@@ -342,11 +401,17 @@ def _strip_hex(text: str) -> str:
 
 def apply_op(op: str, value: bytes) -> bytes:
     name, _, arg = op.partition(":")
+    rot = re.fullmatch(r"rot(\d+)", name)
+    if rot and name not in _DECODERS:  # rot1, rot10... écrits sans deux-points
+        name, arg = "rot", rot.group(1)
     try:
         if name == "rot":
             return _rot(value, int(arg))
         if name == "xor":
-            key = bytes.fromhex(_strip_hex(arg))
+            try:
+                key = bytes.fromhex(_strip_hex(arg))
+            except ValueError:  # clé texte (xor:s4lt26) plutôt qu'hexadécimale
+                key = arg.encode()
             if not key:
                 raise ToolError("xor:CLEHEX attend une clé non vide")
             return bytes(b ^ key[i % len(key)] for i, b in enumerate(value))
