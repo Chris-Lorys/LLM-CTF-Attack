@@ -54,6 +54,13 @@ PRESET_OPTIONS = {
     "deepseek": {"min_interval": 2.0, "max_tokens": 8192},
 }
 
+# Réglages propres à un modèle précis, qui s'ajoutent à ceux du préréglage.
+# gpt-oss-120b sur l'offre gratuite Cerebras : 5 requêtes/min seulement
+# (contre 450 pour qwen) → un appel toutes les 13 s au moins.
+MODEL_OPTIONS = {
+    "cerebras:gpt-oss-120b": {"min_interval": 13.0},
+}
+
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
@@ -180,7 +187,8 @@ def make_model(spec: str, base_url: str | None = None) -> ChatModel:
     options = {}
     if preset in PRESETS and model:
         url = base_url or PRESETS[preset]
-        options = PRESET_OPTIONS.get(preset, {})
+        options = {**PRESET_OPTIONS.get(preset, {}),
+                   **MODEL_OPTIONS.get(f"{preset}:{model}", {})}
     else:
         preset, model, url = "", spec, base_url or PRESETS["ollama"]
     return OpenAICompatModel(model=model, base_url=url, api_key=_api_key(preset), **options)
