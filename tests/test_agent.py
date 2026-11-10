@@ -131,7 +131,7 @@ def test_gpt_oss_120b_cerebras_respecte_5_requetes_par_minute():
 def test_preset_openrouter_laisse_de_la_place_au_raisonnement():
     # Essai DeepSeek V4.1 Flash via OpenRouter (2026-11-10) : 5/23 challenges
     # coupés « par longueur » avec max_tokens 8192.
-    assert make_model("openrouter:deepseek/deepseek-v4.1-flash-1017").max_tokens >= 16384
+    assert make_model("openrouter:deepseek/deepseek-v4.1-flash-1017").max_tokens >= 32768
 
 
 def test_reponse_coupee_par_la_limite_de_jetons(monkeypatch):
