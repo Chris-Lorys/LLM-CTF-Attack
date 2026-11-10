@@ -7,6 +7,7 @@
     python -m csaw_agent list CSAW26_LLMAC_DB/dataset.json
     python -m csaw_agent verify-trace runs/<challenge>/<horodatage>/trace.jsonl
     python -m csaw_agent report runs/<challenge>/<horodatage>/trace.jsonl
+    python -m csaw_agent soumission essais/<id1> essais/<id2> --out soumission
 """
 
 from __future__ import annotations
@@ -187,7 +188,19 @@ def main(argv: list[str] | None = None) -> int:
     p_report = sub.add_parser("report", help="régénérer le rapport d'un run")
     p_report.add_argument("trace", type=Path)
 
+    p_sub = sub.add_parser("soumission",
+                           help="assembler transcripts/ et ancillary/ à partir d'essais")
+    p_sub.add_argument("essais", type=Path, nargs="+",
+                       help="dossiers runs/ téléchargés, dans l'ordre chronologique")
+    p_sub.add_argument("--out", type=Path, default=Path("soumission"))
+
     args = parser.parse_args(argv)
+
+    if args.command == "soumission":
+        from .soumission import assemble
+        summary = assemble(args.essais, args.out)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 1 if summary["traces_rejetees"] else 0
 
     if args.command in ("run", "run-all"):
         router = None

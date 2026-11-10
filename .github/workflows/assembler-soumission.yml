@@ -1,0 +1,63 @@
+name: assembler soumission
+
+# Construit le dossier de soumission CSAW 2026 (structure imposée par les orgas)
+# à partir des artefacts « runs » d'essais déjà terminés, et le publie comme un
+# artefact « soumission » à télécharger puis à pousser dans le dépôt d'équipe.
+#   transcripts/  traces intactes + rapports, nommés {categorie}_{nom}_{solved|unsolved}
+#   report/       write-ups (dossier writeups/ de ce dépôt)
+#   framework/    code source de l'agent, à ce commit
+#   ancillary/    toutes les tentatives, leurs traces et leurs bilans
+# N'exécute aucun LLM : ne consomme aucun quota.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_ids:
+        description: "ID des essais csaw, séparés par un espace, du plus ancien au plus récent"
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  assembler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Télécharger les artefacts des essais
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dirs=""
+          for id in ${{ inputs.run_ids }}; do
+            gh run download "$id" --repo "${{ github.repository }}" --name runs --dir "essais/$id"
+            dirs="$dirs essais/$id"
+          done
+          echo "ESSAIS=$dirs" >> "$GITHUB_ENV"
+
+      - name: Transcriptions et annexes
+        run: |
+          python -m csaw_agent soumission $ESSAIS --out soumission
+          mkdir -p soumission/ancillary/bilans
+          for d in $ESSAIS; do cp "$d/bilan.json" "soumission/ancillary/bilans/$(basename "$d").json"; done
+
+      - name: Write-ups et code source
+        run: |
+          mkdir -p soumission/report soumission/framework
+          if [ -d writeups ]; then cp -r writeups/. soumission/report/; fi
+          git archive HEAD | tar -x -C soumission/framework
+          echo "Commit : ${{ github.sha }}" > soumission/framework/COMMIT.txt
+
+      - name: Contenu
+        run: find soumission -maxdepth 2 | sort | head -100
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soumission
+          path: soumission/
