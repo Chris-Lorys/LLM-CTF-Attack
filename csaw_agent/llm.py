@@ -49,7 +49,8 @@ PRESETS = {
 PRESET_OPTIONS = {
     "gemini": {"min_interval": 7.0, "max_tokens": 8192},   # ~10 requêtes/min gratuites
     "groq": {"min_interval": 2.5},
-    "openrouter": {"min_interval": 3.5, "max_tokens": 8192},  # deepseek-r1, kimi : raisonnement
+    # deepseek, kimi : raisonnement. 8192 coupait 5/23 challenges (essai DeepSeek du 2026-11-10).
+    "openrouter": {"min_interval": 3.5, "max_tokens": 16384},
     "cerebras": {"min_interval": 2.5, "max_tokens": 16384},  # qwen « réfléchit » : place pour le raisonnement + la réponse
     "deepseek": {"min_interval": 2.0, "max_tokens": 8192},
 }
