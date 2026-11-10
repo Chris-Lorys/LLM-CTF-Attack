@@ -90,10 +90,20 @@ def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
             try:
                 with challenge_server(compose, target) as local:
                     from .net import NetworkClient
-                    return run_challenge(ref.json_path, runs_dir, model, max_steps,
-                                         sandbox, net=NetworkClient(local), router=router)
+                    try:
+                        return run_challenge(ref.json_path, runs_dir, model, max_steps,
+                                             sandbox, net=NetworkClient(local), router=router)
+                    except ChallengeError as exc:
+                        return {"status": "erreur_challenge", "error": str(exc)}
+                    except Exception as exc:  # un challenge qui plante ne stoppe pas le lot
+                        traceback.print_exc()
+                        return {"status": "erreur_interne",
+                                "error": f"{type(exc).__name__}: {exc}"}
             except ComposeError as exc:
                 return {"status": "erreur_serveur", "error": str(exc)}
+            except Exception as exc:  # garde-fou : démarrage/démontage du serveur
+                traceback.print_exc()
+                return {"status": "erreur_serveur", "error": f"{type(exc).__name__}: {exc}"}
         if skip_server:
             return {"status": "ignore_serveur"}
         # Ni Docker ni --skip-server : on tente sur les seuls fichiers fournis.

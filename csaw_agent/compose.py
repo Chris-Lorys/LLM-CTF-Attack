@@ -90,14 +90,26 @@ def challenge_server(compose_path: Path, target: ServerTarget, timeout: int = 18
     # Le réseau externe ctfnet doit exister avant le up.
     _run(["docker", "network", "create", CTF_NETWORK])
     try:
-        up = _run(base_cmd + ["up", "-d", "--build"], timeout=timeout)
+        try:
+            up = _run(base_cmd + ["up", "-d", "--build"], timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            # Une image qui met trop longtemps à se construire renvoie une
+            # TimeoutExpired brute : non rattrapée, elle planterait TOUT le lot.
+            # On la convertit en ComposeError (traitée comme « erreur_serveur »).
+            raise ComposeError(
+                f"démarrage trop long (> {timeout} s) : conteneur non construit") from exc
         if up.returncode != 0:
             raise ComposeError(f"échec du démarrage : {up.stderr[-800:]}")
         local = target.with_endpoint("127.0.0.1", host_port)
         _wait_ready(local, timeout=min(timeout, 90))
         yield local
     finally:
-        _run(base_cmd + ["down", "-v", "--remove-orphans"], timeout=120)
+        # Démontage au mieux : son propre délai ou son échec ne doivent ni
+        # masquer le résultat du challenge ni interrompre le lot.
+        try:
+            _run(base_cmd + ["down", "-v", "--remove-orphans"], timeout=120)
+        except subprocess.SubprocessError:
+            pass
         override.unlink(missing_ok=True)
 
 
