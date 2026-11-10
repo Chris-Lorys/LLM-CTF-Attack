@@ -110,6 +110,40 @@ def test_quota_depasse_nouvelle_tentative(monkeypatch):
     assert calls == ["Bearer cle-de-test"] * 2
 
 
+def test_preset_cerebras_laisse_de_la_place_au_raisonnement():
+    # Cerebras sert des modèles « qui réfléchissent » (qwen) : 2048 jetons sont
+    # trop peu (la réflexion les épuise avant la réponse). Le préréglage doit
+    # laisser de la marge (essai du 2026-11-10 : 15/23 coupés « par longueur »).
+    m = make_model("cerebras:qwen-3.8-27b")
+    assert m.max_tokens >= 8192
+
+
+def test_reponse_coupee_par_la_limite_de_jetons(monkeypatch):
+    # Un modèle qui réfléchit met sa réflexion dans `reasoning` et peut laisser
+    # `content` vide s'il atteint max_tokens (finish_reason="length"). L'erreur
+    # doit nommer la cause (limite de jetons), pas rester opaque.
+    import io
+    import urllib.request
+
+    from csaw_agent.llm import LLMError, OpenAICompatModel
+
+    payload = json.dumps({"choices": [{"finish_reason": "length",
+                                       "message": {"reasoning": "je réfléchis sans finir"}}]}).encode()
+
+    class FakeResp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            self.close()
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResp(payload))
+    m = OpenAICompatModel(model="qwen", base_url="http://127.0.0.1:9/v1")
+    with pytest.raises(LLMError) as exc:
+        m.complete([{"role": "user", "content": "x"}])
+    assert "jetons" in str(exc.value)
+
+
 # --- Boucle complète avec un modèle scripté ---------------------------------
 
 def test_boucle_resout_le_cas_encode_par_verification_automatique(tmp_path):
