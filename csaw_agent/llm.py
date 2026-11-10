@@ -82,7 +82,13 @@ class OpenAICompatModel:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }).encode()
-        headers = {"Content-Type": "application/json"}
+        # On s'identifie honnêtement : le défaut d'urllib (« Python-urllib/… »)
+        # est parfois refusé par les pare-feux des fournisseurs. On ne se fait pas
+        # passer pour un navigateur ; on nomme simplement le client.
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "csaw-agent/1.0 (+https://github.com/Chris-Lorys/LLM-CTF-Attack)",
+        }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         url = self.base_url.rstrip("/") + "/chat/completions"
