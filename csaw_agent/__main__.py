@@ -194,7 +194,62 @@ def main(argv: list[str] | None = None) -> int:
                        help="dossiers runs/ téléchargés, dans l'ordre chronologique")
     p_sub.add_argument("--out", type=Path, default=Path("soumission"))
 
+    p_abl = sub.add_parser("ablation",
+                           help="lancer la matrice d'ablation (variantes × challenges)")
+    p_abl.add_argument("root", type=Path, help="dossier de challenges ou dataset.json")
+    _add_model_args(p_abl)
+    _add_select_args(p_abl)
+    p_abl.add_argument("--variante", action="append", dest="variantes",
+                       help="ne jouer que cette variante (répétable ; défaut : toutes)")
+    p_abl.add_argument("--out", type=Path, default=Path("ablation.json"))
+
+    p_anal = sub.add_parser("ablation-traces",
+                            help="analyse rétrospective de traces existantes (coût nul)")
+    p_anal.add_argument("traces", type=Path, nargs="+", help="fichiers trace.jsonl")
+    p_anal.add_argument("--out", type=Path, default=Path("ablation-retrospective.json"))
+
     args = parser.parse_args(argv)
+
+    if args.command == "ablation-traces":
+        from .ablation import analyser_traces
+        summary = analyser_traces(args.traces)
+        args.out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps({k: v for k, v in summary.items() if k != "detail"},
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "ablation":
+        from .ablation import run_ablation, tableau_markdown, variante as _variante
+        if not args.only:
+            print("erreur : précise les challenges avec --only (challenges à fichiers)",
+                  file=sys.stderr)
+            return 2
+        try:
+            if args.models:
+                print("erreur : l'ablation fixe un modèle unique (--model), pas --models",
+                      file=sys.stderr)
+                return 2
+            model = make_model(args.model, args.base_url) if args.model else None
+        except ValueError as exc:
+            print(f"erreur : {exc}", file=sys.stderr)
+            return 2
+        if model is None:
+            print("erreur : l'ablation exige un modèle (--model)", file=sys.stderr)
+            return 2
+        variantes = [_variante(n) for n in args.variantes] if args.variantes else None
+        sandbox_factory = None
+        if args.shell:
+            base = args.root if args.root.is_dir() else args.root.parent
+            protected = list(args.protect) + [base]
+
+            def sandbox_factory():
+                return Sandbox(args.sandbox_user, protected,
+                               isolate_network=not args.shell_avec_reseau)
+        summary = run_ablation(args.root, args.only, args.runs_dir, model, args.max_steps,
+                               sandbox_factory=sandbox_factory, variantes=variantes)
+        args.out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        print("\n" + tableau_markdown(summary))
+        return 0
 
     if args.command == "soumission":
         from .soumission import assemble

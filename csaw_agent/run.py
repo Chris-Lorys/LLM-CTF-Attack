@@ -55,7 +55,7 @@ def prescan(challenge: Challenge, verifier: FlagVerifier, trace: TraceWriter,
 
 def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
                   model: ChatModel | None = None, max_steps: int = 20,
-                  sandbox=None, net=None, router=None) -> dict:
+                  sandbox=None, net=None, router=None, ablation=None) -> dict:
     started = time.monotonic()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = Path(runs_dir) / _SAFE.sub("_", Path(json_path).parent.name) / stamp
@@ -72,8 +72,13 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
         trace.log("ingestion", {"routeur": router.describe()})
         model = router.for_category(challenge.category)
 
+    # En ablation, on peut retirer le pré-scan déterministe (variante B).
     tried: set[str] = set()
-    flag = prescan(challenge, verifier, trace, tried)
+    if ablation is not None and not ablation.prescan:
+        trace.log("ingestion", {"ablation": ablation.nom, "prescan": False})
+        flag = None
+    else:
+        flag = prescan(challenge, verifier, trace, tried)
     status = "resolu" if flag else "non_resolu"
     category, steps, error = None, 0, None
 
@@ -82,7 +87,12 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
             trace.log("sandbox", sandbox.describe())
         if net is not None:
             trace.log("network", net.target.describe())
-        agent = Agent(model, Toolbox(run_dir / "files", sandbox, net), verifier, trace, max_steps)
+        toolbox = Toolbox(run_dir / "files", sandbox, net)
+        # Variante E : plus d'outils déterministes, le LLM n'a que son raisonnement.
+        if ablation is not None and not ablation.outils:
+            toolbox.tools.clear()
+            trace.log("ingestion", {"ablation": ablation.nom, "outils": False})
+        agent = Agent(model, toolbox, verifier, trace, max_steps, ablation=ablation)
         result = agent.solve(challenge, tried)
         flag, category, steps, error = result.flag, result.category, result.steps, result.error
         status = result.status if result.status != "budget_epuise" else "non_resolu"
