@@ -50,7 +50,7 @@ PRESET_OPTIONS = {
     "gemini": {"min_interval": 7.0, "max_tokens": 8192},   # ~10 requêtes/min gratuites
     "groq": {"min_interval": 2.5},
     "openrouter": {"min_interval": 3.5, "max_tokens": 8192},  # deepseek-r1, kimi : raisonnement
-    "cerebras": {"min_interval": 2.5},
+    "cerebras": {"min_interval": 2.5, "max_tokens": 16384},  # qwen « réfléchit » : place pour le raisonnement + la réponse
     "deepseek": {"min_interval": 2.0, "max_tokens": 8192},
 }
 
@@ -111,9 +111,21 @@ class OpenAICompatModel:
             except (urllib.error.URLError, TimeoutError) as exc:
                 raise LLMError(f"modèle injoignable ({self.base_url}) : {exc}") from exc
         try:
-            return data["choices"][0]["message"]["content"] or ""
+            choice = data["choices"][0]
+            message = choice["message"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError(f"réponse inattendue : {str(data)[:300]}") from exc
+        content = message.get("content")
+        if content:
+            return content
+        # Un modèle « qui réfléchit » met sa réflexion dans un champ séparé
+        # (`reasoning`) et peut laisser `content` vide s'il atteint max_tokens en
+        # plein raisonnement (finish_reason="length"). On le dit clairement : la
+        # solution est d'augmenter max_tokens, pas de renvoyer une erreur opaque.
+        if choice.get("finish_reason") == "length":
+            raise LLMError("réponse coupée par la limite de jetons "
+                           "(max_tokens trop bas pour ce modèle qui réfléchit)")
+        return content or ""
 
 
 def _retry_delay(retry_after: str | None, attempt: int) -> float:
