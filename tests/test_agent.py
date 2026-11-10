@@ -118,6 +118,22 @@ def test_preset_cerebras_laisse_de_la_place_au_raisonnement():
     assert m.max_tokens >= 8192
 
 
+def test_gpt_oss_120b_cerebras_respecte_5_requetes_par_minute():
+    # Offre gratuite Cerebras : gpt-oss-120b est limité à 5 requêtes/min.
+    # Le réglage propre au modèle espace les appels sans perdre ceux du
+    # préréglage (max_tokens) ni ralentir les autres modèles Cerebras.
+    fort = make_model("cerebras:gpt-oss-120b")
+    assert fort.min_interval >= 12.0
+    assert fort.max_tokens >= 8192
+    assert make_model("cerebras:qwen-3.8-27b").min_interval < 5.0
+
+
+def test_preset_openrouter_laisse_de_la_place_au_raisonnement():
+    # Essai DeepSeek V4.1 Flash via OpenRouter (2026-11-10) : 5/23 challenges
+    # coupés « par longueur » avec max_tokens 8192.
+    assert make_model("openrouter:deepseek/deepseek-v4.1-flash-1017").max_tokens >= 32768
+
+
 def test_reponse_coupee_par_la_limite_de_jetons(monkeypatch):
     # Un modèle qui réfléchit met sa réflexion dans `reasoning` et peut laisser
     # `content` vide s'il atteint max_tokens (finish_reason="length"). L'erreur

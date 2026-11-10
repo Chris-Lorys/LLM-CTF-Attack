@@ -49,9 +49,19 @@ PRESETS = {
 PRESET_OPTIONS = {
     "gemini": {"min_interval": 7.0, "max_tokens": 8192},   # ~10 requêtes/min gratuites
     "groq": {"min_interval": 2.5},
-    "openrouter": {"min_interval": 3.5, "max_tokens": 8192},  # deepseek-r1, kimi : raisonnement
+    # deepseek, kimi : forte réflexion. 8192 coupait 5/23, 16384 coupait encore
+    # 4/8 crypto/pwn (essais DeepSeek du 2026-11-10) → 32768 (OpenRouter autorise
+    # de grandes réponses ; billed au jeton, donc sans surcoût quand la réponse est courte).
+    "openrouter": {"min_interval": 3.5, "max_tokens": 32768},
     "cerebras": {"min_interval": 2.5, "max_tokens": 16384},  # qwen « réfléchit » : place pour le raisonnement + la réponse
     "deepseek": {"min_interval": 2.0, "max_tokens": 8192},
+}
+
+# Réglages propres à un modèle précis, qui s'ajoutent à ceux du préréglage.
+# gpt-oss-120b sur l'offre gratuite Cerebras : 5 requêtes/min seulement
+# (contre 450 pour qwen) → un appel toutes les 13 s au moins.
+MODEL_OPTIONS = {
+    "cerebras:gpt-oss-120b": {"min_interval": 13.0},
 }
 
 RETRY_STATUS = {429, 500, 502, 503, 504}
@@ -180,7 +190,8 @@ def make_model(spec: str, base_url: str | None = None) -> ChatModel:
     options = {}
     if preset in PRESETS and model:
         url = base_url or PRESETS[preset]
-        options = PRESET_OPTIONS.get(preset, {})
+        options = {**PRESET_OPTIONS.get(preset, {}),
+                   **MODEL_OPTIONS.get(f"{preset}:{model}", {})}
     else:
         preset, model, url = "", spec, base_url or PRESETS["ollama"]
     return OpenAICompatModel(model=model, base_url=url, api_key=_api_key(preset), **options)
