@@ -1,0 +1,44 @@
+name: exporter rapports
+
+# Utilitaire : récupère l'artefact « runs » d'un essai déjà terminé et imprime,
+# dans le journal, le rapport.md (généré automatiquement à partir de la trace)
+# de chaque challenge demandé. Sert à produire les write-ups sans télécharger
+# l'artefact à la main. N'exécute aucun LLM : ne consomme aucun quota.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID du run (essai csaw) dont on exporte les rapports"
+        required: true
+      only_resolved:
+        description: "N'imprimer que les challenges résolus"
+        type: boolean
+        default: true
+
+jobs:
+  exporter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Télécharger l'artefact runs du run demandé
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" --name runs --dir dl
+
+      - name: Imprimer les rapports
+        run: |
+          shopt -s globstar nullglob
+          found=0
+          for f in dl/**/rapport.md; do
+            if [ "${{ inputs.only_resolved }}" = "true" ] && ! grep -qF "| Statut | resolu |" "$f"; then
+              continue
+            fi
+            echo "################################################################"
+            echo "# RAPPORT : $f"
+            echo "################################################################"
+            cat "$f"
+            echo
+            echo
+            found=$((found + 1))
+          done
+          echo "===== $found rapport(s) imprimé(s) ====="
