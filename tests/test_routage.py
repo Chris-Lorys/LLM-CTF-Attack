@@ -45,12 +45,12 @@ def test_routeur_choisit_par_categorie(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "gm")
     router = make_router("crypto=openrouter:deepseek/deepseek-r1:free,"
                          "pwn=openrouter:moonshotai/kimi-k2.6:free,"
-                         "default=gemini:gemini-2.5-flash")
+                         "default=gemini:gemini-3.8-flash")
     assert isinstance(router, ModelRouter)
     assert router.for_category("crypto").model == "deepseek/deepseek-r1:free"
     assert router.for_category("pwn").model == "moonshotai/kimi-k2.6:free"
     # Catégorie non routée : le modèle par défaut.
-    assert router.for_category("web").model == "gemini-2.5-flash"
+    assert router.for_category("web").model == "gemini-3.8-flash"
     assert router.for_category("crypto").api_key == "or"
     assert router.for_category("web").api_key == "gm"
 

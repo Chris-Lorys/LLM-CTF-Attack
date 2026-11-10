@@ -7,7 +7,7 @@ installer sur le PC.
 
 ## Avec l'API Gemini gratuite (réglage par défaut)
 
-Par défaut, `MODEL = "gemini:gemini-2.5-flash"`. C'est un modèle de pointe, gratuit dans la limite d'un
+Par défaut, `MODEL = "gemini:gemini-3.8-flash"`. C'est un modèle de pointe, gratuit dans la limite d'un
 quota par minute et par jour. L'agent espace ses appels d'environ 7 s. Si le serveur répond 429
 (quota dépassé), il attend puis réessaie. Quand le quota du jour est épuisé, les challenges restants
 finissent en `erreur_llm`, mais le bilan est quand même écrit. Il suffit de relancer le lendemain avec

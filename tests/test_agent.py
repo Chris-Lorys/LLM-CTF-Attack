@@ -67,8 +67,8 @@ def test_make_model_presets():
     assert m.model == "qwen2.5:3b" and m.base_url.startswith("http://localhost:11434")
     m = make_model("mon-modele", "https://exemple.kaggle/v1")
     assert m.model == "mon-modele" and m.base_url == "https://exemple.kaggle/v1"
-    m = make_model("gemini:gemini-2.5-flash")
-    assert m.model == "gemini-2.5-flash" and "generativelanguage" in m.base_url
+    m = make_model("gemini:gemini-3.8-flash")
+    assert m.model == "gemini-3.8-flash" and "generativelanguage" in m.base_url
     assert m.min_interval > 0 and m.max_tokens >= 8192
 
 

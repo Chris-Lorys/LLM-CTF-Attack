@@ -198,7 +198,7 @@ def make_router(spec: str, base_url: str | None = None) -> ModelRouter:
     """Construit un routeur depuis `cat=preset:modele,...,default=preset:modele`.
 
     Exemple : `crypto=openrouter:deepseek/deepseek-r1:free,
-    pwn=openrouter:moonshotai/kimi-k2.6:free,default=gemini:gemini-2.5-flash`.
+    pwn=openrouter:moonshotai/kimi-k2.6:free,default=gemini:gemini-3.8-flash`.
     La clé `default` est obligatoire.
     """
     routes: dict[str, ChatModel] = {}
