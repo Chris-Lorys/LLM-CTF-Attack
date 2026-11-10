@@ -1,0 +1,48 @@
+name: ablation retrospective
+
+# Analyse rétrospective d'ablation, à coût nul (aucun LLM) : télécharge les
+# artefacts « runs » d'essais déjà terminés et mesure, sur les traces existantes,
+# ce que chaque brique « par retrait » a réellement apporté — d'où vient chaque
+# flag (pré-scan / vérification auto / check_flag du LLM), combien de candidats
+# trompeurs le garde-fou a écartés, combien de répétitions ont été bloquées.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_ids:
+        description: "ID des essais csaw, séparés par un espace"
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  retrospective:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Télécharger les artefacts des essais
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in ${{ inputs.run_ids }}; do
+            gh run download "$id" --repo "${{ github.repository }}" --name runs --dir "essais/$id" || true
+          done
+
+      - name: Analyse rétrospective
+        run: |
+          shopt -s globstar nullglob
+          traces=(essais/**/trace.jsonl)
+          echo "${#traces[@]} trace(s) trouvée(s)."
+          python -m csaw_agent ablation-traces "${traces[@]}" --out ablation-retrospective.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ablation-retrospective
+          path: ablation-retrospective.json

@@ -1,0 +1,81 @@
+name: ablation
+
+# Étude d'ablation : retire une brique de l'agent à la fois (pré-scan, vérification
+# automatique, mémoire de travail, outils déterministes) et compare l'effet, le
+# modèle et le jeu de challenges restant fixes. Sert le volet « créativité » du
+# rapport. Se lance sur des challenges à fichiers (sans serveur), donc sans Docker.
+#
+# Choisir un modèle tenu constant sur toutes les variantes. Par défaut un modèle
+# gratuit (Cerebras qwen) pour ne rien dépenser ; la clé vient d'un secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Modèle unique tenu constant (préréglage:nom)"
+        default: "cerebras:qwen-3.8-27b"
+      only:
+        description: "Challenges à fichiers, séparés par un espace"
+        default: "2026q-rev-autobahn 2026q-rev-machine_head"
+      max_steps:
+        description: "Budget d'actions par challenge"
+        default: "40"
+      variantes:
+        description: "Variantes à jouer (vide = toutes : A→E)"
+        default: ""
+
+jobs:
+  ablation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Outils d'analyse et utilisateur du bac à sable
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \
+            file binutils p7zip-full unzip sqlite3 tshark xxd libimage-exiftool-perl sox
+          pip install pycryptodome scapy pyyaml
+          id ctfsandbox || sudo useradd -M -s /bin/bash ctfsandbox
+
+      - name: Cloner la base CSAW 2026
+        run: git clone --depth 1 https://github.com/NYU-LLM-CTF/CSAW26_LLMAC_DB.git
+
+      - name: Lancer l'ablation
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          vars=""
+          for v in ${{ inputs.variantes }}; do vars="$vars --variante $v"; done
+          onlys=""
+          for o in ${{ inputs.only }}; do onlys="$onlys --only $o"; done
+          sudo -E env "PATH=$PATH" \
+            GEMINI_API_KEY="$GEMINI_API_KEY" OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
+            GROQ_API_KEY="$GROQ_API_KEY" CEREBRAS_API_KEY="$CEREBRAS_API_KEY" \
+            DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+            python -m csaw_agent ablation CSAW26_LLMAC_DB/dataset.json \
+              --model ${{ inputs.model }} --max-steps ${{ inputs.max_steps }} \
+              --runs-dir runs-ablation --shell $onlys $vars --out runs-ablation/ablation.json
+
+      - name: Tableau comparatif
+        if: always()
+        run: |
+          sudo chown -R "$USER" runs-ablation || true
+          test -f runs-ablation/ablation.json && \
+            python -c "import json; from csaw_agent.ablation import tableau_markdown; print(tableau_markdown(json.load(open('runs-ablation/ablation.json'))))" \
+            || echo "pas de bilan d'ablation"
+
+      - name: Publier les traces d'ablation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runs-ablation
+          path: runs-ablation/

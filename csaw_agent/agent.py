@@ -178,12 +178,15 @@ def initial_message(challenge: Challenge, has_net: bool = False) -> str:
 
 class Agent:
     def __init__(self, model: ChatModel, toolbox: Toolbox, verifier: FlagVerifier,
-                 trace: TraceWriter, max_steps: int = 20):
+                 trace: TraceWriter, max_steps: int = 20, *, ablation=None):
         self.model = model
         self.toolbox = toolbox
         self.verifier = verifier
         self.trace = trace
         self.max_steps = max_steps
+        # Étude d'ablation : par défaut toutes les briques sont actives.
+        self.use_memory = ablation.memoire if ablation else True
+        self.auto_verif = ablation.auto_verif if ablation else True
         self.tried: set[str] = set()
         # Dernières actions : un petit modèle relance souvent la même commande en boucle.
         self.recent: list[str] = []
@@ -206,7 +209,7 @@ class Agent:
             recent = recent[-HISTORY_WINDOW:]
             if recent and recent[0]["role"] == "user":  # garder l'alternance assistant/user
                 recent = recent[1:]
-        if self.notes:
+        if self.notes and self.use_memory:
             notes = "\n".join(f"- {n}" for n in self.notes)
             head = [head[0], {"role": "user", "content": head[1]["content"]
                               + "\n\nTes notes (faits établis plus tôt) :\n" + notes}]
@@ -279,14 +282,15 @@ class Agent:
                 self.trace.log("decision", {"step": step, "stop": "abandon", "reason": reason})
                 return AgentResult("abandon", None, step, category)
 
-            key = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
-            if key in self.recent:
-                self.trace.log("decision", {"step": step, "repetition": name})
-                self._send(messages, "Tu as déjà exécuté exactement cette action : le résultat "
-                           "serait le même. Change d'outil, d'arguments ou d'hypothèse. "
-                           + self._budget(step), step)
-                continue
-            self.recent = (self.recent + [key])[-RECENT_WINDOW:]
+            if self.use_memory:
+                key = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
+                if key in self.recent:
+                    self.trace.log("decision", {"step": step, "repetition": name})
+                    self._send(messages, "Tu as déjà exécuté exactement cette action : le résultat "
+                               "serait le même. Change d'outil, d'arguments ou d'hypothèse. "
+                               + self._budget(step), step)
+                    continue
+                self.recent = (self.recent + [key])[-RECENT_WINDOW:]
 
             try:
                 output = self.toolbox.call(name, args)
@@ -299,9 +303,11 @@ class Agent:
                                            "output": output})
 
             # Vérification automatique : le code ne compte pas sur le LLM pour repérer le flag.
-            for candidate in find_candidates(output):
-                if candidate not in self.tried and self._check(candidate, f"auto:{name}"):
-                    return AgentResult("resolu", candidate, step, category)
+            # (Désactivable en ablation : le LLM doit alors appeler check_flag lui-même.)
+            if self.auto_verif:
+                for candidate in find_candidates(output):
+                    if candidate not in self.tried and self._check(candidate, f"auto:{name}"):
+                        return AgentResult("resolu", candidate, step, category)
 
             self._send(messages, f"Résultat de {name} :\n"
                        + wrap_untrusted(output, f"outil {name}")
