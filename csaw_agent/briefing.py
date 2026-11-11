@@ -56,50 +56,47 @@ _SYMBOLES_NOTABLES = (
 
 
 # --- Fiches de méthode : générales, par format ou catégorie -------------------
-# Points de départ généraux, du type qu'on trouve dans n'importe quel cours de CTF.
-# Aucune ne vise un challenge précis.
+# Points de départ neutres : inventorier, inspecter la structure avec l'outil
+# adapté, puis automatiser l'analyse dans un script. Elles ne nomment volontairement
+# aucune attaque ni astuce précise : elles ont été rédigées après nos premiers essais,
+# et une piste trop précise reviendrait à souffler une solution vue dans nos traces.
 
 FICHES: dict[str, str] = {
     "elf": (
-        "Exécutable ELF : relever l'architecture et les protections (readelf -h -l -S), "
-        "lister les symboles et les chaînes, puis désassembler (objdump -d) pour retrouver la "
-        "logique de vérification de l'entrée. En rétro-ingénierie, reconstituer l'algorithme et "
-        "l'inverser dans un script plutôt que le lire à la main ; s'il se déchiffre lui-même, "
-        "reproduire la transformation par du code."),
+        "Exécutable ELF : relever l'architecture et les protections (readelf -h -l -S), lister "
+        "les symboles et les chaînes, puis désassembler (objdump -d) pour comprendre la logique. "
+        "Reproduire ce qu'on comprend dans un script plutôt que de raisonner de tête."),
     "pe": (
-        "Exécutable Windows (PE) : chaînes et objdump -d pour localiser la vérification ; même "
-        "démarche qu'un ELF (reconstituer la logique, puis l'inverser dans un script)."),
+        "Exécutable Windows (PE) : chaînes et objdump -d pour comprendre la logique, puis la "
+        "reproduire dans un script."),
     "image": (
-        "Image : lire les métadonnées (exiftool), parcourir la structure (blocs PNG, segments "
-        "JPEG), repérer des données après le marqueur de fin, puis examiner les bits de poids "
-        "faible canal par canal, le tout dans un script."),
+        "Image : lire les métadonnées (exiftool) et parcourir la structure du format, puis "
+        "analyser le contenu par un script plutôt qu'à l'œil."),
     "zip": (
-        "Archive : lister le contenu et les commentaires avant d'extraire. Si elle est chiffrée, "
-        "chercher le mot de passe dans les autres fichiers et la description d'abord."),
+        "Archive : lister le contenu et les commentaires avant d'extraire, puis analyser chaque "
+        "fichier obtenu comme un fichier à part entière."),
     "imbrique": (
-        "Signature d'un autre format repérée en plein milieu du fichier : découper à partir de "
-        "l'offset indiqué (script Python) et analyser le morceau comme un fichier à part entière."),
+        "Un autre format est signalé dans le fichier : l'extraire à partir de l'offset indiqué "
+        "(script Python) et l'analyser comme un fichier à part entière."),
     "sqlite": (
-        "Base SQLite : lister les tables et lire les lignes (sqlite3). Regarder aussi un éventuel "
-        "journal -wal : il peut contenir des enregistrements absents de la base principale."),
+        "Base SQLite : lister les tables et lire les données (sqlite3) ; examiner aussi tout "
+        "fichier compagnon fourni avec elle."),
     "capture": (
-        "Capture réseau : suivre les flux (tshark), isoler le protocole applicatif et "
-        "reconstituer les données transférées."),
+        "Capture réseau : inventorier les protocoles et les flux (tshark), puis reconstituer "
+        "les échanges pertinents."),
     "texte_encode": (
-        "Texte qui ressemble à un encodage (base64, hexadécimal) : décoder par étapes avec "
-        "l'outil decode et observer le résultat à chaque passe."),
+        "Texte qui ressemble à un encodage : décoder par étapes avec l'outil decode et observer "
+        "le résultat à chaque passe."),
     "crypto": (
-        "Challenge de cryptographie : lire le script fourni pour identifier le schéma et ses "
-        "paramètres, chercher la propriété qui le rend faible (petit exposant, module partagé, "
-        "faible densité...), puis monter l'attaque correspondante dans un script."),
+        "Cryptographie : lire entièrement le code fourni, identifier le schéma et tous ses "
+        "paramètres, et vérifier par un script chaque hypothèse sur sa faiblesse."),
     "web": (
-        "Service web : cartographier les routes et les paramètres, observer la gestion de session "
-        "et des entrées, et tester les écarts entre ce que le serveur attend et ce qu'il accepte."),
+        "Service web : cartographier les routes et les paramètres, lire le code fourni s'il y en "
+        "a, et observer comment le serveur traite les entrées et la session."),
     "pwn": (
-        "Binaire de la catégorie pwn : d'abord caractériser, sans rien envoyer — architecture et "
-        "protections (readelf, présence d'un canari, pile exécutable ou non, PIE), puis la "
-        "fonction d'entrée et le format attendu. Reproduire et tester le comportement en local "
-        "avant toute interaction avec le serveur du challenge."),
+        "Binaire de la catégorie pwn : d'abord caractériser, sans rien envoyer — architecture, "
+        "protections (readelf), fonction d'entrée et format attendu. Reproduire et tester le "
+        "comportement en local avant toute interaction avec le serveur du challenge."),
 }
 
 # Quels mots-clés du guess_type déclenchent quelle fiche.
@@ -178,8 +175,7 @@ def _sqlite_faits(path: Path) -> list[str]:
         faits.append("base SQLite (en-tête présent, lecture directe impossible)")
     for suffixe in ("-wal", "-journal"):
         if path.with_name(path.name + suffixe).exists():
-            faits.append(f"journal SQLite « {path.name}{suffixe} » présent : "
-                         "peut contenir des enregistrements absents de la base principale")
+            faits.append(f"fichier compagnon SQLite « {path.name}{suffixe} » présent")
     return faits
 
 
