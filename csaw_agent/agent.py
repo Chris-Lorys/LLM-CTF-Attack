@@ -181,7 +181,7 @@ def initial_message(challenge: Challenge, has_net: bool = False) -> str:
 class Agent:
     def __init__(self, model: ChatModel, toolbox: Toolbox, verifier: FlagVerifier,
                  trace: TraceWriter, max_steps: int = 20, *, ablation=None,
-                 briefing: str = ""):
+                 briefing: str = "", indice: str | None = None):
         self.model = model
         self.toolbox = toolbox
         self.verifier = verifier
@@ -194,6 +194,7 @@ class Agent:
         self.use_hypotheses = ablation.hypotheses if ablation else True
         # Briefing de faits rédigé par le code (vide si retiré en ablation).
         self.briefing = briefing if self.use_briefing else ""
+        self.indice = indice
         self.hyps = HypothesisRegister()
         self.tried: set[str] = set()
         # Dernières actions : un petit modèle relance souvent la même commande en boucle.
@@ -240,6 +241,10 @@ class Agent:
         intro = initial_message(challenge, self.toolbox.net is not None)
         if self.briefing:
             intro += "\n\n" + self.briefing
+        if self.indice:
+            intro += ("\n\nIndice d'un membre de l'équipe (approche hybride ; c'est une "
+                      "orientation, pas une solution, à vérifier par tes outils) :\n"
+                      + self.indice)
         messages: list[Message] = [
             {"role": "system", "content": SYSTEM_PROMPT.format(tools=tools)},
             {"role": "user", "content": intro},

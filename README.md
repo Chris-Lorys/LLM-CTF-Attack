@@ -59,6 +59,24 @@ Chaque run produit `runs/<challenge>/<horodatage>/` avec `trace.jsonl`, `rapport
 des fichiers. Le rapport cite l'empreinte finale de la chaîne de hachages de la trace : on peut
 vérifier que la trace jointe est bien celle dont il est tiré.
 
+## Approche hybride (indice humain)
+
+Le règlement CSAW autorise, challenge par challenge, une approche hybride agent + humain, tant
+que la solution vient de l'IA. L'option `--indice` (ou `--indices fichier.json` pour `run-all`,
+input `indices` du workflow) ajoute un indice humain au prompt de départ :
+
+```bash
+python -m csaw_agent run chemin/challenge.json --model ... --indice "le fichier semble encodé"
+python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json --model ... --indices indices.json
+```
+
+- L'indice est **consigné mot pour mot dans la trace chaînée, avant le premier appel au modèle** :
+  impossible de l'ajouter ou de le retoucher après coup sans que `verify-trace` le détecte.
+- Le code **refuse tout indice contenant une chaîne au format d'un flag** (et les indices vides
+  ou de plus de 500 caractères) : l'humain oriente, il ne donne jamais la réponse.
+- `rapport.md` et le récapitulatif de soumission affichent l'approche (`autonome` / `hybride`)
+  et l'indice exact.
+
 ## Règles respectées
 
 - Le flag attendu n'est jamais transmis au LLM, qui ne reçoit que le résultat vrai/faux de `check_flag`.

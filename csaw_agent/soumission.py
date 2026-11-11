@@ -35,6 +35,7 @@ class Attempt:
     model: str | None
     llm_steps: int | None
     trace: Path | None  # None si le challenge n'a laissé aucune trace
+    approche: str = "autonome"  # ou "hybride" (indice humain consigné dans la trace)
 
     @property
     def name(self) -> str:
@@ -88,6 +89,8 @@ def read_attempts(essai_dir: Path) -> list[Attempt]:
             model=entry.get("model"),
             llm_steps=entry.get("llm_steps"),
             trace=_locate(essai_dir, entry.get("run_dir")),
+            # Les essais antérieurs à l'option indice n'ont pas le champ : autonomes.
+            approche=entry.get("approche", "autonome"),
         ))
     return attempts
 
@@ -124,6 +127,7 @@ def assemble(essai_dirs: list[Path], out: Path) -> dict:
     for a in attempts:
         row = {"essai": a.essai, "id": a.id, "categorie": a.category, "statut": a.status,
                "modele": a.model, "etapes_llm": a.llm_steps, "trace_sha256": None,
+               "approche": a.approche,
                "trace_integre": None}
         if a.trace is not None:
             ok, message = verify_trace(a.trace)
@@ -168,14 +172,14 @@ def _essais_md(rows: list[dict], chosen: dict[str, Attempt]) -> str:
         "",
         f"Challenges résolus : **{len(solved)}** ({', '.join(solved) or 'aucun'}).",
         "",
-        "| Essai | Challenge | Catégorie | Statut | Modèle | Étapes LLM | Trace intègre | Retenue |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Essai | Challenge | Catégorie | Statut | Approche | Modèle | Étapes LLM | Trace intègre | Retenue |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         model = (r["modele"] or "—").split("@")[0]
         integre = {True: "oui", False: "NON", None: "pas de trace"}[r["trace_integre"]]
         retenue = "✔" if (r["essai"], r["id"]) in kept else ""
         lines.append(f"| {r['essai']} | {r['id']} | {r['categorie']} | {r['statut']} | "
-                     f"{model} | {r['etapes_llm'] if r['etapes_llm'] is not None else '—'} | "
+                     f"{r.get('approche', 'autonome')} | {model} | {r['etapes_llm'] if r['etapes_llm'] is not None else '—'} | "
                      f"{integre} | {retenue} |")
     return "\n".join(lines) + "\n"

@@ -34,6 +34,9 @@ on:
         description: "Démarrer les conteneurs des challenges à serveur"
         type: boolean
         default: true
+      indices:
+        description: 'Approche hybride : JSON {"identifiant": "indice humain"} (jamais de flag ni de solution ; vide = autonome)'
+        default: ""
 
 jobs:
   run:
@@ -71,8 +74,15 @@ jobs:
 
       - name: Préparer les options
         id: opts
+        env:
+          # Passé par l'environnement, jamais interpolé dans le script (guillemets du JSON).
+          INDICES: ${{ inputs.indices }}
         run: |
           opts=""
+          if [ -n "$INDICES" ]; then
+            printf '%s' "$INDICES" > indices.json
+            opts="$opts --indices indices.json"
+          fi
           for c in ${{ inputs.categories }}; do opts="$opts --category $c"; done
           for o in ${{ inputs.only }}; do opts="$opts --only $o"; done
           if [ "${{ inputs.docker }}" = "true" ]; then opts="$opts --docker"; fi
