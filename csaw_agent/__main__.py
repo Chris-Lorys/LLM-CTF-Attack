@@ -218,7 +218,19 @@ def main(argv: list[str] | None = None) -> int:
     p_anal.add_argument("traces", type=Path, nargs="+", help="fichiers trace.jsonl")
     p_anal.add_argument("--out", type=Path, default=Path("ablation-retrospective.json"))
 
+    p_ech = sub.add_parser("echecs",
+                           help="dossier de ce que l'agent a tenté sur les non-résolus (coût nul)")
+    p_ech.add_argument("traces", type=Path, nargs="+", help="fichiers trace.jsonl")
+    p_ech.add_argument("--out", type=Path, default=Path("echecs.md"))
+
     args = parser.parse_args(argv)
+
+    if args.command == "echecs":
+        from .echecs import dossier_echecs
+        texte = dossier_echecs(args.traces)
+        args.out.write_text(texte, encoding="utf-8")
+        print(texte)
+        return 0
 
     if args.command == "ablation-traces":
         from .ablation import analyser_traces
