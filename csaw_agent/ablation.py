@@ -41,6 +41,8 @@ class Ablation:
     auto_verif: bool = True     # vérification auto des candidats dans les sorties d'outils
     memoire: bool = True        # notes retenues + garde anti-répétition
     outils: bool = True         # outils déterministes (sinon LLM seul)
+    briefing: bool = True       # briefing de faits établis par le code au départ
+    hypotheses: bool = True     # registre d'hypothèses suivi par le code
 
 
 # La matrice : la référence, puis une brique retirée à la fois.
@@ -55,6 +57,10 @@ VARIANTES: list[Ablation] = [
             description="sans mémoire de travail (notes + anti-répétition)", memoire=False),
     replace(REFERENCE, nom="E_sans_outils",
             description="sans outils déterministes (LLM seul)", outils=False),
+    replace(REFERENCE, nom="F_sans_briefing",
+            description="sans briefing de faits (prompt de départ générique)", briefing=False),
+    replace(REFERENCE, nom="G_sans_hypotheses",
+            description="sans registre d'hypothèses suivi par le code", hypotheses=False),
 ]
 
 

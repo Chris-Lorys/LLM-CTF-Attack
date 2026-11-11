@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from .challenge import Challenge
 from .flag import FlagVerifier, find_candidates
+from .hypotheses import HypothesisRegister
 from .llm import ChatModel, LLMError, Message
 from .tools import Toolbox, ToolError, guess_type
 from .trace import TraceWriter
@@ -33,9 +34,10 @@ Tu es un agent autonome qui résout un challenge CTF. Personne ne répondra à t
 
 Méthode :
 1. Identifie la catégorie (crypto, forensics, rev, pwn, web, misc) à partir de la description et des fichiers.
-2. Établis un plan court, puis avance une action à la fois.
-3. Observe chaque résultat. Si une piste échoue, change d'hypothèse au lieu de répéter la même action.
-4. Quand tu tiens un flag, vérifie-le avec check_flag.
+2. Pars des faits déjà établis par le système (ne les revérifie pas) et formule une hypothèse avec l'action hypothese.
+3. Avance une action à la fois pour tester l'hypothèse courante.
+4. Observe chaque résultat. Si une hypothèse est contredite, marque-la réfutée (hypothese avec id et statut) et change de piste au lieu de répéter la même action.
+5. Quand tu tiens un flag, vérifie-le avec check_flag.
 
 Tu ne fais jamais de calcul ou de décodage de tête : utilise les outils, qui sont exacts.
 
@@ -178,7 +180,8 @@ def initial_message(challenge: Challenge, has_net: bool = False) -> str:
 
 class Agent:
     def __init__(self, model: ChatModel, toolbox: Toolbox, verifier: FlagVerifier,
-                 trace: TraceWriter, max_steps: int = 20, *, ablation=None):
+                 trace: TraceWriter, max_steps: int = 20, *, ablation=None,
+                 briefing: str = ""):
         self.model = model
         self.toolbox = toolbox
         self.verifier = verifier
@@ -187,6 +190,11 @@ class Agent:
         # Étude d'ablation : par défaut toutes les briques sont actives.
         self.use_memory = ablation.memoire if ablation else True
         self.auto_verif = ablation.auto_verif if ablation else True
+        self.use_briefing = ablation.briefing if ablation else True
+        self.use_hypotheses = ablation.hypotheses if ablation else True
+        # Briefing de faits rédigé par le code (vide si retiré en ablation).
+        self.briefing = briefing if self.use_briefing else ""
+        self.hyps = HypothesisRegister()
         self.tried: set[str] = set()
         # Dernières actions : un petit modèle relance souvent la même commande en boucle.
         self.recent: list[str] = []
@@ -209,18 +217,32 @@ class Agent:
             recent = recent[-HISTORY_WINDOW:]
             if recent and recent[0]["role"] == "user":  # garder l'alternance assistant/user
                 recent = recent[1:]
+        # On enrichit le 2e message (la présentation) de ce que le code garde pour le
+        # modèle : ses notes et l'état des hypothèses. Toujours à jour, jamais tronqué.
+        extra = []
         if self.notes and self.use_memory:
-            notes = "\n".join(f"- {n}" for n in self.notes)
-            head = [head[0], {"role": "user", "content": head[1]["content"]
-                              + "\n\nTes notes (faits établis plus tôt) :\n" + notes}]
+            extra.append("Tes notes (faits établis plus tôt) :\n"
+                         + "\n".join(f"- {n}" for n in self.notes))
+        if self.use_hypotheses:
+            bloc = self.hyps.bloc_prompt()
+            if bloc:
+                extra.append(bloc)
+        if extra:
+            head = [head[0], {"role": "user",
+                              "content": head[1]["content"] + "\n\n" + "\n\n".join(extra)}]
         return head + recent
 
     def solve(self, challenge: Challenge, already_tried: set[str] = frozenset()) -> AgentResult:
         self.tried |= set(already_tried)
-        tools = "\n".join(f"- {t.signature()}" for t in self.toolbox.tools.values())
+        # L'action hypothese n'est proposée que si le registre est actif (ablation G).
+        tools = "\n".join(f"- {t.signature()}" for t in self.toolbox.tools.values()
+                          if self.use_hypotheses or t.name != "hypothese")
+        intro = initial_message(challenge, self.toolbox.net is not None)
+        if self.briefing:
+            intro += "\n\n" + self.briefing
         messages: list[Message] = [
             {"role": "system", "content": SYSTEM_PROMPT.format(tools=tools)},
-            {"role": "user", "content": initial_message(challenge, self.toolbox.net is not None)},
+            {"role": "user", "content": intro},
         ]
         self.trace.log("prompt", {"model": self.model.name, "messages": messages})
 
@@ -277,6 +299,19 @@ class Agent:
                            + self._budget(step), step)
                 continue
 
+            if name == "hypothese" and self.use_hypotheses:
+                hid = args.get("id") if isinstance(args, dict) else None
+                statut = args.get("statut") if isinstance(args, dict) else None
+                texte = args.get("texte") if isinstance(args, dict) else None
+                if isinstance(hid, str) and hid and isinstance(statut, str) and statut:
+                    msg = self.hyps.statuer(hid, statut)
+                else:
+                    msg, _ = self.hyps.declarer(texte if isinstance(texte, str) else "")
+                self.trace.log("decision", {"step": step, "hypothese": msg,
+                                            "etat": [h.__dict__ for h in self.hyps.hyps]})
+                self._send(messages, f"{msg} {self._budget(step)}", step)
+                continue
+
             if name == "give_up":
                 reason = args.get("reason") if isinstance(args, dict) else None
                 self.trace.log("decision", {"step": step, "stop": "abandon", "reason": reason})
@@ -286,9 +321,10 @@ class Agent:
                 key = json.dumps([name, args], sort_keys=True, ensure_ascii=False)
                 if key in self.recent:
                     self.trace.log("decision", {"step": step, "repetition": name})
+                    relance = (" " + self.hyps.relance()) if self.use_hypotheses else ""
                     self._send(messages, "Tu as déjà exécuté exactement cette action : le résultat "
-                               "serait le même. Change d'outil, d'arguments ou d'hypothèse. "
-                               + self._budget(step), step)
+                               "serait le même. Change d'outil, d'arguments ou d'hypothèse."
+                               + relance + " " + self._budget(step), step)
                     continue
                 self.recent = (self.recent + [key])[-RECENT_WINDOW:]
 
