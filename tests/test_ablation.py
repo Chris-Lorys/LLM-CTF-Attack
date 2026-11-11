@@ -22,10 +22,14 @@ def _events(run_dir):
 
 def test_matrice_des_variantes():
     assert [v.nom for v in VARIANTES] == [
-        "A_reference", "B_sans_prescan", "C_sans_autoverif", "D_sans_memoire", "E_sans_outils"]
+        "A_reference", "B_sans_prescan", "C_sans_autoverif", "D_sans_memoire", "E_sans_outils",
+        "F_sans_briefing", "G_sans_hypotheses"]
     assert REFERENCE.prescan and REFERENCE.auto_verif and REFERENCE.memoire and REFERENCE.outils
+    assert REFERENCE.briefing and REFERENCE.hypotheses
     assert variante("B_sans_prescan").prescan is False
     assert variante("E_sans_outils").outils is False
+    assert variante("F_sans_briefing").briefing is False
+    assert variante("G_sans_hypotheses").hypotheses is False
     with pytest.raises(KeyError):
         variante("inconnue")
 
@@ -87,6 +91,44 @@ def test_sans_outils_vide_la_boite(tmp_path):
     results = [x["payload"] for x in _events(e["run_dir"])
                if x["type"] == "tool_result" and x["payload"].get("tool") == "list_files"]
     assert results and results[0]["ok"] is False and "inconnu" in results[0]["output"]
+
+
+def test_briefing_present_par_defaut_absent_en_variante_F(tmp_path):
+    # Référence : le briefing de faits est journalisé dans la trace.
+    ref = run_challenge(FIXTURES / "demo-encode" / "challenge.json", tmp_path / "a",
+                        ScriptedModel([act("give_up", reason="x")]))
+    ev = _events(ref["run_dir"])
+    assert any(e["type"] == "ingestion" and "briefing" in e["payload"] for e in ev)
+    # Variante F : aucun briefing.
+    f = run_challenge(FIXTURES / "demo-encode" / "challenge.json", tmp_path / "b",
+                      ScriptedModel([act("give_up", reason="x")]),
+                      ablation=variante("F_sans_briefing"))
+    evf = _events(f["run_dir"])
+    assert not any(e["type"] == "ingestion" and "briefing" in e["payload"] for e in evf)
+
+
+def test_hypothese_suivie_par_le_code(tmp_path):
+    # Le modèle déclare une hypothèse, la réfute, puis abandonne : la trace garde l'état.
+    actions = [act("hypothese", texte="le flag est en base64"),
+               json.dumps({"categorie": "crypto", "pensee": "t", "action": "hypothese",
+                           "args": {"id": "H1", "statut": "refutee"}}),
+               act("give_up", reason="x")]
+    e = run_challenge(FIXTURES / "demo-encode" / "challenge.json", tmp_path,
+                      ScriptedModel(actions))
+    ev = _events(e["run_dir"])
+    hyps = [x["payload"] for x in ev if x["type"] == "decision" and "hypothese" in x["payload"]]
+    assert len(hyps) == 2
+    assert hyps[-1]["etat"][0]["statut"] == "refutee"
+
+
+def test_variante_G_ne_propose_pas_l_action_hypothese(tmp_path):
+    g = run_challenge(FIXTURES / "demo-encode" / "challenge.json", tmp_path,
+                      ScriptedModel([act("give_up", reason="x")]),
+                      ablation=variante("G_sans_hypotheses"))
+    ev = _events(g["run_dir"])
+    prompt = next(e for e in ev if e["type"] == "prompt")
+    système = prompt["payload"]["messages"][0]["content"]
+    assert "hypothese(" not in système
 
 
 def test_analyse_retrospective_attribue_la_bonne_source(tmp_path):

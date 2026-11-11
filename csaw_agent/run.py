@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .agent import Agent
+from .briefing import build_briefing
 from .challenge import Challenge, load_challenge
 from .flag import FlagVerifier, find_candidates
 from .llm import ChatModel
@@ -92,7 +93,15 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
         if ablation is not None and not ablation.outils:
             toolbox.tools.clear()
             trace.log("ingestion", {"ablation": ablation.nom, "outils": False})
-        agent = Agent(model, toolbox, verifier, trace, max_steps, ablation=ablation)
+        # Briefing de faits rédigé par le code (variante F = retiré).
+        briefing_txt = ""
+        if ablation is None or ablation.briefing:
+            briefing = build_briefing(challenge)
+            briefing_txt = briefing.texte()
+            trace.log("ingestion", {"briefing": {"faits": briefing.faits,
+                                                 "fiches": len(briefing.fiches)}})
+        agent = Agent(model, toolbox, verifier, trace, max_steps,
+                      ablation=ablation, briefing=briefing_txt)
         result = agent.solve(challenge, tried)
         flag, category, steps, error = result.flag, result.category, result.steps, result.error
         status = result.status if result.status != "budget_epuise" else "non_resolu"

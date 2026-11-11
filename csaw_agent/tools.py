@@ -198,6 +198,12 @@ class Toolbox:
         add("note", "retient un fait établi (clé, offset, indice) : les notes restent "
             "visibles jusqu'à la fin, alors que l'historique ancien est effacé",
             [Param("text", str, "le fait à retenir, en une phrase")], _handled_by_agent)
+        add("hypothese", "déclare une hypothèse de travail, ou met à jour son statut ; le "
+            "système en tient le registre et t'empêche de revenir sur une piste réfutée",
+            [Param("texte", str, "l'hypothèse, en une phrase", False, ""),
+             Param("id", str, "id d'une hypothèse à statuer, p. ex. H1", False, ""),
+             Param("statut", str, "'confirmee' ou 'refutee' (avec id)", False, "")],
+            _handled_by_agent)
         add("give_up", "abandonne le challenge en expliquant pourquoi",
             [Param("reason", str, "raison de l'abandon")], _handled_by_agent)
 
