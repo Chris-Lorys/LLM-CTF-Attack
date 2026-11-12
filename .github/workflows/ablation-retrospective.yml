@@ -49,6 +49,11 @@ jobs:
           shopt -s globstar nullglob
           python -m csaw_agent echecs essais/**/trace.jsonl --out echecs.md
 
+      - name: Cascade frugale (rejeu des traces)
+        run: |
+          shopt -s globstar nullglob
+          python -m csaw_agent cascade-traces essais/**/trace.jsonl --out cascade-retrospective.json
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -56,3 +61,4 @@ jobs:
           path: |
             ablation-retrospective.json
             echecs.md
+            cascade-retrospective.json

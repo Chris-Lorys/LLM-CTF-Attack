@@ -59,6 +59,23 @@ Chaque run produit `runs/<challenge>/<horodatage>/` avec `trace.jsonl`, `rapport
 des fichiers. Le rapport cite l'empreinte finale de la chaîne de hachages de la trace : on peut
 vérifier que la trace jointe est bien celle dont il est tiré.
 
+## Cascade frugale pilotée par la progression
+
+`--cascade "preset:modele_gratuit>preset:modele_fort"` fait travailler d'abord un modèle
+gratuit. À chaque étape, le code mesure la progression : gain d'information (lignes de
+sortie jamais vues, notes, hypothèses tranchées) ou échec (erreur d'outil, action répétée,
+flag refusé, réponse illisible). Quand l'agent stagne (`--patience` étapes sans gain, ou
+3 échecs d'affilée), ou si le modèle tombe en erreur, **c'est le code qui décide** de passer
+au palier suivant. Le modèle plus fort ne relit pas l'historique : il reçoit un état compact
+établi par le code (notes, hypothèses, actions déjà faites, candidats refusés).
+Chaque escalade et sa raison sont consignées dans la trace et dans `rapport.md`.
+
+```bash
+python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json --shell \
+  --cascade "openrouter:nvidia/nemotron-3.5-super-vl:free>openrouter:moonshotai/kimi-k3.1-pro"
+python -m csaw_agent cascade-traces runs/**/trace.jsonl   # évaluation à coût nul sur des traces
+```
+
 ## Approche hybride (indice humain)
 
 Le règlement CSAW autorise, challenge par challenge, une approche hybride agent + humain, tant

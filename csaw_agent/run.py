@@ -80,7 +80,7 @@ def valider_indice(indice: str) -> str:
 def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
                   model: ChatModel | None = None, max_steps: int = 20,
                   sandbox=None, net=None, router=None, ablation=None,
-                  indice: str | None = None) -> dict:
+                  indice: str | None = None, cascade=None) -> dict:
     if indice is not None:  # refusé avant de créer quoi que ce soit
         indice = valider_indice(indice)
     started = time.monotonic()
@@ -104,6 +104,11 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
         trace.log("ingestion", {"routeur": router.describe()})
         model = router.for_category(challenge.category)
 
+    # Cascade frugale : on démarre sur le palier le moins cher.
+    if cascade is not None:
+        trace.log("ingestion", {"cascade": cascade.describe()})
+        model = cascade.paliers[0]
+
     # En ablation, on peut retirer le pré-scan déterministe (variante B).
     tried: set[str] = set()
     if ablation is not None and not ablation.prescan:
@@ -113,6 +118,7 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
         flag = prescan(challenge, verifier, trace, tried)
     status = "resolu" if flag else "non_resolu"
     category, steps, error = None, 0, None
+    escalades: list[dict] = []
 
     if flag is None and model is not None:
         if sandbox is not None:
@@ -132,8 +138,10 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
             trace.log("ingestion", {"briefing": {"faits": briefing.faits,
                                                  "fiches": len(briefing.fiches)}})
         agent = Agent(model, toolbox, verifier, trace, max_steps,
-                      ablation=ablation, briefing=briefing_txt, indice=indice)
+                      ablation=ablation, briefing=briefing_txt, indice=indice,
+                      cascade=cascade)
         result = agent.solve(challenge, tried)
+        model, escalades = agent.model, agent.escalades
         flag, category, steps, error = result.flag, result.category, result.steps, result.error
         status = result.status if result.status != "budget_epuise" else "non_resolu"
 
@@ -148,6 +156,8 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
         "run_dir": str(run_dir),
         "approche": "hybride" if indice else "autonome",
     }
+    if cascade is not None:
+        summary["cascade"] = {**cascade.describe(), "escalades": escalades}
     if error:
         summary["error"] = error
     trace.log("end", summary)
