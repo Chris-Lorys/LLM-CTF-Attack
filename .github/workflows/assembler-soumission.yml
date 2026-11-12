@@ -45,7 +45,12 @@ jobs:
         run: |
           python -m csaw_agent soumission $ESSAIS --out soumission
           mkdir -p soumission/ancillary/bilans
-          for d in $ESSAIS; do cp "$d/bilan.json" "soumission/ancillary/bilans/$(basename "$d").json"; done
+          # bilan.json est à la racine de l'artefact, ou dans un sous-dossier si
+          # l'artefact a plusieurs chemins (runs/ + atelier/) : on le cherche.
+          for d in $ESSAIS; do
+            f=$(find "$d" -maxdepth 2 -name bilan.json | head -1)
+            [ -n "$f" ] && cp "$f" "soumission/ancillary/bilans/$(basename "$d").json" || true
+          done
 
       - name: Write-ups et code source
         run: |

@@ -98,7 +98,9 @@ jobs:
           for c in ${{ inputs.categories }}; do opts="$opts --category $c"; done
           for o in ${{ inputs.only }}; do opts="$opts --only $o"; done
           if [ "${{ inputs.docker }}" = "true" ]; then opts="$opts --docker"; fi
-          if [ "${{ inputs.atelier }}" = "true" ]; then opts="$opts --atelier atelier"; fi
+          # Atelier rangé SOUS runs/ pour que l'artefact garde une racine unique
+          # (bilan.json à la racine ; sinon l'assemblage ne le trouve pas).
+          if [ "${{ inputs.atelier }}" = "true" ]; then opts="$opts --atelier runs/atelier"; fi
           # Cascade si remplie, sinon routage multi-modèles, sinon modèle unique.
           if [ -n "$CASCADE" ]; then
             printf '%s' "$CASCADE" > cascade.txt
@@ -132,15 +134,13 @@ jobs:
       - name: Résumé
         if: always()
         run: |
-          sudo chown -R "$USER" runs atelier 2>/dev/null || true
+          sudo chown -R "$USER" runs 2>/dev/null || true
           test -f runs/bilan.json && python -c "import json;[print(f\"{r['status']:<18} {r.get('id')}\") for r in json.load(open('runs/bilan.json'))]" || echo "pas de bilan"
-          test -f atelier/index.json && echo "Outils forgés :" && cat atelier/index.json || true
+          test -f runs/atelier/index.json && echo "Outils forgés :" && cat runs/atelier/index.json || true
 
       - name: Publier les traces
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: runs
-          path: |
-            runs/
-            atelier/
+          path: runs/

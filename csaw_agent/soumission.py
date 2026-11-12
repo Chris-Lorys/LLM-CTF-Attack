@@ -73,22 +73,36 @@ def _locate(essai_dir: Path, run_dir: str | None) -> Path | None:
     return None
 
 
+def _trouver_bilan(essai_dir: Path) -> Path | None:
+    """bilan.json à la racine de l'artefact, ou dans un sous-dossier (artefact à
+    plusieurs chemins, p. ex. runs/ + atelier/) : on prend le moins profond."""
+    direct = essai_dir / "bilan.json"
+    if direct.is_file():
+        return direct
+    candidats = sorted(essai_dir.glob("*/bilan.json"), key=lambda p: len(p.parts))
+    return candidats[0] if candidats else None
+
+
 def read_attempts(essai_dir: Path) -> list[Attempt]:
-    bilan = essai_dir / "bilan.json"
-    if not bilan.is_file():
+    bilan = _trouver_bilan(essai_dir)
+    if bilan is None:
         return []
+    # Le nom de l'essai (étiquette) reste l'ID du run ; les traces se cherchent à
+    # côté du bilan (racine de l'artefact, ou sous-dossier si l'artefact est nesté).
+    essai_nom = essai_dir.name
+    trace_base = bilan.parent
     attempts = []
     for entry in json.loads(bilan.read_text(encoding="utf-8")):
         if entry.get("status") == "ignore_serveur":
             continue
         attempts.append(Attempt(
-            essai=essai_dir.name,
+            essai=essai_nom,
             id=entry.get("id", "?"),
             category=entry.get("category_db") or "misc",
             status=entry.get("status", "?"),
             model=entry.get("model"),
             llm_steps=entry.get("llm_steps"),
-            trace=_locate(essai_dir, entry.get("run_dir")),
+            trace=_locate(trace_base, entry.get("run_dir")),
             # Les essais antérieurs à l'option indice n'ont pas le champ : autonomes.
             approche=entry.get("approche", "autonome"),
         ))

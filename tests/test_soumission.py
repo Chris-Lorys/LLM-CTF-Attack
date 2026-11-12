@@ -68,3 +68,23 @@ def test_refuse_un_chemin_qui_sort_de_l_essai(tmp_path):
     (e1 / "bilan.json").write_text(json.dumps(bilan))
     summary = assemble([e1], tmp_path / "out")
     assert summary["challenges"] == 0
+
+
+def test_artefact_neste_bilan_dans_un_sous_dossier(tmp_path):
+    """Essai avec --atelier au niveau racine : l'artefact a runs/ + atelier/, donc
+    bilan.json et les traces sont sous runs/. L'assemblage doit quand même les trouver."""
+    e = _essai(tmp_path, "999", [("2026q-rev-autobahn", "rev", "non_resolu")])
+    # On simule le nesting : tout le contenu de l'essai passe sous runs/, plus atelier/.
+    nested = tmp_path / "999n"
+    (nested / "runs").mkdir(parents=True)
+    for item in e.iterdir():
+        item.rename(nested / "runs" / item.name)
+    (nested / "atelier").mkdir()
+    (nested / "atelier" / "index.json").write_text("{}", encoding="utf-8")
+
+    out = tmp_path / "out"
+    summary = assemble([nested], out)
+    assert summary["tentatives"] == 1
+    assert (out / "transcripts" / "rev_autobahn_unsolved.jsonl").is_file()
+    # L'étiquette de l'essai reste l'ID du run (999n), pas « runs ».
+    assert (out / "ancillary" / "traces" / "999n" / "2026q-rev-autobahn.jsonl").is_file()
