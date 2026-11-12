@@ -244,3 +244,37 @@ def tableau_cascade(resultat: dict) -> str:
                    f"{l['etape_detection_moy'] if l['etape_detection_moy'] is not None else '—'} "
                    f"| {part} |")
     return "\n".join(out)
+
+
+def escalades_reelles(traces: list[Path]) -> list[dict]:
+    """Escalades effectivement décidées dans des runs joués avec --cascade."""
+    out = []
+    for t in traces:
+        try:
+            events = [json.loads(l) for l in Path(t).read_text(encoding="utf-8").split("\n")
+                      if l.strip()]
+        except (OSError, ValueError):
+            continue
+        cas = next((e["payload"]["cascade"] for e in events
+                    if e["type"] == "ingestion" and "cascade" in e["payload"]), None)
+        if cas is None:
+            continue
+        end = next((e["payload"] for e in reversed(events) if e["type"] == "end"), {})
+        out.append({
+            "challenge": Path(t).parent.parent.name,
+            "statut": end.get("status", "interrompu"),
+            "etapes": end.get("llm_steps", 0),
+            "escalades": [e["payload"]["escalade"] for e in events
+                          if e["type"] == "decision" and "escalade" in e["payload"]],
+        })
+    return out
+
+
+def tableau_escalades(runs: list[dict]) -> str:
+    if not runs:
+        return "Aucun run joué avec --cascade."
+    out = ["| Challenge | Statut | Actions | Escalades (étape : raison) |", "|---|---|---|---|"]
+    for r in runs:
+        esc = "; ".join(f"{x['step']} : {x['raison']}" for x in r["escalades"]) or "aucune"
+        out.append(f"| {r['challenge']} | {r['statut']} | {r['etapes']} | {esc} |")
+    return "\n".join(out)

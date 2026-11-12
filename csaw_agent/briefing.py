@@ -95,8 +95,9 @@ FICHES: dict[str, str] = {
         "a, et observer comment le serveur traite les entrées et la session."),
     "pwn": (
         "Binaire de la catégorie pwn : d'abord caractériser, sans rien envoyer — architecture, "
-        "protections (readelf), fonction d'entrée et format attendu. Reproduire et tester le "
-        "comportement en local avant toute interaction avec le serveur du challenge."),
+        "protections (checksec / readelf), fonction d'entrée et format attendu. Un débogueur "
+        "(gdb) et la bibliothèque pwntools sont disponibles dans le shell : reproduire et "
+        "tester le comportement en local, avec eux, avant toute interaction avec le serveur."),
 }
 
 # Quels mots-clés du guess_type déclenchent quelle fiche.

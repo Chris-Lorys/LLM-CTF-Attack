@@ -70,10 +70,12 @@ class Tool:
 class Toolbox:
     """Outils liés à l'espace de travail d'un run."""
 
-    def __init__(self, files_dir: Path, sandbox=None, net=None):
+    def __init__(self, files_dir: Path, sandbox=None, net=None, atelier=None):
         self.files_dir = Path(files_dir).resolve()
         self.sandbox = sandbox
         self.net = net
+        self.atelier = atelier
+        self.categorie = ""  # mise à jour par l'agent quand il annonce la catégorie
         self.written: set[str] = set()
         if sandbox is not None:
             sandbox.attach(self.files_dir)
@@ -166,8 +168,9 @@ class Toolbox:
             self.extract)
         if self.sandbox is not None:
             add("shell", "commande bash dans le dossier des fichiers, sans réseau, utilisateur "
-                "sans privilèges (file, strings, unzip, 7z, sqlite3, tshark, objdump, "
-                "python3...) ; les fichiers créés deviennent lisibles par les autres outils",
+                "sans privilèges (file, strings, unzip, 7z, sqlite3, tshark, objdump, gdb, "
+                "python3 avec pwntools...) ; les fichiers créés deviennent lisibles par les "
+                "autres outils",
                 [Param("command", str, "la commande, p. ex. 'file *'"),
                  Param("timeout", int, "délai en secondes (max 120)", False, 30)],
                 self.shell)
@@ -195,6 +198,17 @@ class Toolbox:
             "fichiers ; pratique pour un script python lancé ensuite par shell",
             [Param("name", str, "nom du fichier, p. ex. solve.py"),
              Param("content", str, "contenu du fichier")], self.write_file)
+        if self.atelier is not None:
+            add("garder_outil", "range un script que tu as écrit (write_file) dans ta "
+                "bibliothèque d'outils, pour le réutiliser sur d'autres challenges ; le "
+                "système vérifie qu'il compile avant de le garder",
+                [Param("file", str, "le script écrit avec write_file, p. ex. solve.py"),
+                 Param("nom", str, "nom court de l'outil, p. ex. decode_vm"),
+                 Param("description", str, "ce que l'outil fait, en une phrase")],
+                self.garder_outil)
+            add("utiliser_outil", "copie dans tes fichiers un outil déjà écrit sur un autre "
+                "challenge (voir la liste en tête) ; lance-le ensuite avec shell",
+                [Param("nom", str, "nom de l'outil à reprendre")], self.utiliser_outil)
         add("note", "retient un fait établi (clé, offset, indice) : les notes restent "
             "visibles jusqu'à la fin, alors que l'historique ancien est effacé",
             [Param("text", str, "le fait à retenir, en une phrase")], _handled_by_agent)
@@ -243,6 +257,37 @@ class Toolbox:
             fh.write(content)
         self.written.add(name)
         return f"{name} écrit ({len(content.encode())} octets)"
+
+    def garder_outil(self, file: str, nom: str, description: str) -> str:
+        if file not in self.written:
+            raise ToolError(f"{file!r} n'a pas été écrit par write_file dans ce run ; "
+                            "écris d'abord le script, puis garde-le")
+        source = self._file(file).read_text(encoding="utf-8", errors="replace")
+        from .atelier import AtelierError
+        try:
+            outil = self.atelier.garder(nom, description, source, categorie=self.categorie,
+                                        origine=self.files_dir.parent.parent.name)
+        except AtelierError as exc:
+            raise ToolError(str(exc)) from exc
+        return (f"outil '{outil.nom}' rangé dans la bibliothèque ({outil.lignes} lignes) ; "
+                "il sera proposé sur les prochains challenges")
+
+    def utiliser_outil(self, nom: str) -> str:
+        source = self.atelier.charger(nom)
+        if source is None:
+            dispo = ", ".join(o.nom for o in self.atelier.liste()) or "(aucun)"
+            raise ToolError(f"outil inconnu : {nom!r} ; disponibles : {dispo}")
+        cible = f"{nom}.py"
+        target = self.files_dir / cible
+        if os.path.lexists(target) and cible not in self.written:
+            raise ToolError(f"{cible} existe déjà dans tes fichiers")
+        if os.path.lexists(target):
+            target.unlink()
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(source)
+        self.written.add(cible)
+        return f"{cible} copié depuis la bibliothèque ; lance-le avec shell (python3 {cible})"
 
     def list_files(self) -> str:
         rows = [f"{p.name}\t{p.stat().st_size} octets"

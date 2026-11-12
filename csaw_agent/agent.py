@@ -255,6 +255,8 @@ class Agent:
         intro = initial_message(challenge, self.toolbox.net is not None)
         if self.briefing:
             intro += "\n\n" + self.briefing
+        if self.toolbox.atelier is not None and (bloc := self.toolbox.atelier.bloc_briefing()):
+            intro += "\n\n" + bloc
         if self.indice:
             intro += ("\n\nIndice d'un membre de l'équipe (approche hybride ; c'est une "
                       "orientation, pas une solution, à vérifier par tes outils) :\n"
@@ -301,6 +303,7 @@ class Agent:
 
             if isinstance(action.get("categorie"), str) and action["categorie"] != category:
                 category = action["categorie"]
+                self.toolbox.categorie = category  # pour étiqueter un outil gardé (atelier)
                 self.trace.log("decision", {"step": step, "categorie": category})
 
             name, args = action["action"], action["args"]

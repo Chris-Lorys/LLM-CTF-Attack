@@ -76,6 +76,28 @@ python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json --shell \
 python -m csaw_agent cascade-traces runs/**/trace.jsonl   # évaluation à coût nul sur des traces
 ```
 
+## Agent forgeron (bibliothèque d'outils)
+
+Avec `--atelier DOSSIER`, l'agent peut **garder un script qu'il a écrit** et le **réutiliser
+sur les challenges suivants**. Quand il écrit un outil utile avec `write_file`, il le range avec
+l'action `garder_outil` ; le **code** vérifie qu'il compile, l'étiquette (catégorie, challenge
+d'origine) et le range dans une bibliothèque qui survit d'un challenge à l'autre. Sur un challenge
+suivant, les outils disponibles sont listés dans le prompt de départ, et l'action `utiliser_outil`
+en copie un dans l'espace de travail, prêt à être lancé par `shell`.
+
+```bash
+python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json --shell --atelier atelier --model ...
+```
+
+Chaque conservation et chaque réutilisation sont des **décisions tracées** : on vérifie dans la
+trace chaînée quand un outil est né et quand il a resservi. C'est la démarche « par retrait »
+appliquée à la mémoire outillée : le modèle écrit la logique une fois, le code en fait un outil
+fiable et persistant.
+
+Pour la catégorie **pwn**, le shell du bac à sable dispose d'un débogueur (`gdb`) et de la
+bibliothèque `pwntools`, en plus du désassembleur (`objdump`) et de l'outil réseau borné au seul
+serveur du challenge.
+
 ## Approche hybride (indice humain)
 
 Le règlement CSAW autorise, challenge par challenge, une approche hybride agent + humain, tant
