@@ -70,6 +70,11 @@ def test_make_model_presets():
     m = make_model("gemini:gemini-3.8-flash")
     assert m.model == "gemini-3.8-flash" and "generativelanguage" in m.base_url
     assert m.min_interval > 0 and m.max_tokens >= 8192
+    # NVIDIA NIM : point d'accès compatible OpenAI, modèles Nemotron qui réfléchissent.
+    m = make_model("nvidia:nvidia/llama-3.3-nemotron-super-49b-v1.5")
+    assert m.model == "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+    assert "integrate.api.nvidia.com" in m.base_url
+    assert m.min_interval > 0 and m.max_tokens >= 8192
 
 
 def test_quota_depasse_nouvelle_tentative(monkeypatch):

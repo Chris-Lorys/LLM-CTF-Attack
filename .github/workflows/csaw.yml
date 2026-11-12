@@ -10,7 +10,7 @@ name: essai csaw
 # défaut openrouter:openrouter/free route automatiquement vers un modèle gratuit disponible,
 # ce qui évite les noms de modèles qui changent. Pour le routage multi-modèles ou d'autres
 # fournisseurs, ajouter aussi les clés utiles : GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY,
-# DEEPSEEK_API_KEY (les secrets absents restent vides, sans erreur).
+# DEEPSEEK_API_KEY, NVIDIA_API_KEY (les secrets absents restent vides, sans erreur).
 
 on:
   workflow_dispatch:
@@ -121,12 +121,13 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
         run: |
           # root pour le bac à sable (setpriv vers ctfsandbox) ; -E garde les clés.
           sudo -E env "PATH=$PATH" \
             GEMINI_API_KEY="$GEMINI_API_KEY" OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
             GROQ_API_KEY="$GROQ_API_KEY" CEREBRAS_API_KEY="$CEREBRAS_API_KEY" \
-            DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+            DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" NVIDIA_API_KEY="$NVIDIA_API_KEY" \
             python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json \
               --max-steps ${{ inputs.max_steps }} \
               --runs-dir runs --shell ${{ steps.opts.outputs.opts }}
