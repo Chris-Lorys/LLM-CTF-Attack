@@ -21,6 +21,9 @@ on:
       models:
         description: "Routage par catégorie, p. ex. crypto=openrouter:openrouter/free,default=openrouter:openrouter/free"
         default: ""
+      cascade:
+        description: "Cascade frugale 'gratuit>fort' (le code escalade quand la progression stagne) ; remplace model/models"
+        default: ""
       categories:
         description: "Catégories séparées par un espace (vide = toutes)"
         default: ""
@@ -77,6 +80,7 @@ jobs:
         env:
           # Passé par l'environnement, jamais interpolé dans le script (guillemets du JSON).
           INDICES: ${{ inputs.indices }}
+          CASCADE: ${{ inputs.cascade }}
         run: |
           opts=""
           if [ -n "$INDICES" ]; then
@@ -86,8 +90,11 @@ jobs:
           for c in ${{ inputs.categories }}; do opts="$opts --category $c"; done
           for o in ${{ inputs.only }}; do opts="$opts --only $o"; done
           if [ "${{ inputs.docker }}" = "true" ]; then opts="$opts --docker"; fi
-          # Routage multi-modèles si 'models' est rempli, sinon modèle unique.
-          if [ -n "${{ inputs.models }}" ]; then
+          # Cascade si remplie, sinon routage multi-modèles, sinon modèle unique.
+          if [ -n "$CASCADE" ]; then
+            printf '%s' "$CASCADE" > cascade.txt
+            opts="$opts --cascade @cascade.txt"  # « > » ne doit pas passer par le shell
+          elif [ -n "${{ inputs.models }}" ]; then
             opts="$opts --models ${{ inputs.models }}"
           else
             opts="$opts --model ${{ inputs.model }}"

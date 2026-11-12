@@ -304,12 +304,15 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if args.cascade:
                 from .cascade import make_cascade
-                cascade = make_cascade(args.cascade, args.base_url, patience=args.patience)
+                spec = args.cascade
+                if spec.startswith("@"):  # spec lue dans un fichier (workflow : « > » hors du shell)
+                    spec = Path(spec[1:]).read_text(encoding="utf-8").strip()
+                cascade = make_cascade(spec, args.base_url, patience=args.patience)
             elif args.models:
                 router = make_router(args.models, args.base_url)
             elif args.model:
                 model = make_model(args.model, args.base_url)
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             print(f"erreur : {exc}", file=sys.stderr)
             return 2
         sandbox = None

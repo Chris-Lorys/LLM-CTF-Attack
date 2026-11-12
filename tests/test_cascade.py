@@ -118,3 +118,10 @@ def test_cli_cascade_traces(tmp_path, capsys):
     out = tmp_path / "c.json"
     assert main(["cascade-traces", str(Path(s["run_dir"]) / "trace.jsonl"), "--out", str(out)]) == 0
     assert json.loads(out.read_text())["balayage"]
+
+
+def test_cli_cascade_depuis_un_fichier(tmp_path, capsys):
+    spec = tmp_path / "cascade.txt"
+    spec.write_text("ollama:seul\n")  # un seul palier : refusé avec un message clair
+    code = main(["run", str(ENCODE), "--cascade", f"@{spec}", "--runs-dir", str(tmp_path / "r")])
+    assert code == 2 and "au moins deux paliers" in capsys.readouterr().err
