@@ -125,3 +125,14 @@ def test_cli_cascade_depuis_un_fichier(tmp_path, capsys):
     spec.write_text("ollama:seul\n")  # un seul palier : refusé avec un message clair
     code = main(["run", str(ENCODE), "--cascade", f"@{spec}", "--runs-dir", str(tmp_path / "r")])
     assert code == 2 and "au moins deux paliers" in capsys.readouterr().err
+
+
+def test_escalades_reelles_dans_les_traces(tmp_path):
+    from csaw_agent.cascade import escalades_reelles, tableau_escalades
+    lire = act("read_file", path="message.txt")
+    c = Cascade([Named("petit", [lire] * 5), Named("fort", [act("check_flag", candidate=FLAG)])])
+    s = run_challenge(ENCODE, tmp_path, max_steps=10, cascade=c)
+    sans = run_challenge(ENCODE, tmp_path / "b", ScriptedModel([act("give_up", reason="x")]))
+    runs = escalades_reelles([Path(x["run_dir"]) / "trace.jsonl" for x in (s, sans)])
+    assert len(runs) == 1 and runs[0]["statut"] == "resolu" and len(runs[0]["escalades"]) == 1
+    assert "échecs" in tableau_escalades(runs)

@@ -237,10 +237,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "cascade-traces":
-        from .cascade import evaluer_cascade, tableau_cascade
+        from .cascade import (escalades_reelles, evaluer_cascade, tableau_cascade,
+                              tableau_escalades)
         resultat = evaluer_cascade(args.traces)
+        resultat["runs_cascade"] = escalades_reelles(args.traces)
         args.out.write_text(json.dumps(resultat, ensure_ascii=False, indent=2), encoding="utf-8")
         print(tableau_cascade(resultat))
+        print("\nRuns joués avec la cascade :\n" + tableau_escalades(resultat["runs_cascade"]))
         return 0
 
     if args.command == "echecs":
