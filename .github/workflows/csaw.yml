@@ -40,6 +40,10 @@ on:
       indices:
         description: 'Approche hybride : JSON {"identifiant": "indice humain"} (jamais de flag ni de solution ; vide = autonome)'
         default: ""
+      atelier:
+        description: "Agent forgeron : garder et réutiliser d'un challenge à l'autre les outils que l'agent écrit"
+        type: boolean
+        default: false
 
 jobs:
   run:
@@ -69,7 +73,11 @@ jobs:
             || { echo "échec d'installation des outils essentiels"; exit 1; }
           sudo timeout 300 apt-get -o Acquire::Retries=3 -qq install -y tshark sox \
             || echo "outils optionnels (tshark/sox) non installés : on continue"
+          # Outils pwn (best-effort) : un débogueur dans le bac à sable pour la catégorie pwn.
+          sudo timeout 300 apt-get -o Acquire::Retries=3 -qq install -y gdb \
+            || echo "gdb non installé : on continue"
           pip install pytest pycryptodome scapy pyyaml
+          pip install pwntools || echo "pwntools non installé : on continue"
           id ctfsandbox || sudo useradd -M -s /bin/bash ctfsandbox
 
       - name: Cloner la base CSAW 2026
@@ -90,6 +98,7 @@ jobs:
           for c in ${{ inputs.categories }}; do opts="$opts --category $c"; done
           for o in ${{ inputs.only }}; do opts="$opts --only $o"; done
           if [ "${{ inputs.docker }}" = "true" ]; then opts="$opts --docker"; fi
+          if [ "${{ inputs.atelier }}" = "true" ]; then opts="$opts --atelier atelier"; fi
           # Cascade si remplie, sinon routage multi-modèles, sinon modèle unique.
           if [ -n "$CASCADE" ]; then
             printf '%s' "$CASCADE" > cascade.txt
@@ -123,12 +132,15 @@ jobs:
       - name: Résumé
         if: always()
         run: |
-          sudo chown -R "$USER" runs || true
+          sudo chown -R "$USER" runs atelier 2>/dev/null || true
           test -f runs/bilan.json && python -c "import json;[print(f\"{r['status']:<18} {r.get('id')}\") for r in json.load(open('runs/bilan.json'))]" || echo "pas de bilan"
+          test -f atelier/index.json && echo "Outils forgés :" && cat atelier/index.json || true
 
       - name: Publier les traces
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: runs
-          path: runs/
+          path: |
+            runs/
+            atelier/

@@ -44,6 +44,8 @@ def _add_model_args(p: argparse.ArgumentParser) -> None:
                    "(remplace --model et --models)")
     p.add_argument("--patience", type=int, default=6,
                    help="cascade : étapes sans information nouvelle avant d'escalader")
+    p.add_argument("--atelier", type=Path, help="dossier d'une bibliothèque d'outils que "
+                   "l'agent écrit et réutilise d'un challenge à l'autre (agent forgeron)")
     p.add_argument("--max-steps", type=int, default=20)
     p.add_argument("--shell", action="store_true",
                    help="donner au LLM un shell en bac à sable (root requis, voir sandbox.py)")
@@ -88,7 +90,7 @@ def _challenge_target(json_path: Path):
 
 def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
              *, skip_server: bool, docker: bool, router=None, indice=None,
-             cascade=None) -> dict:
+             cascade=None, atelier=None) -> dict:
     """Résout un challenge, en démarrant son conteneur si c'est un challenge à serveur."""
     if ref.needs_server:
         target = _challenge_target(ref.json_path)
@@ -100,7 +102,7 @@ def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
                     try:
                         return run_challenge(ref.json_path, runs_dir, model, max_steps,
                                              sandbox, net=NetworkClient(local), router=router,
-                                             indice=indice, cascade=cascade)
+                                             indice=indice, cascade=cascade, atelier=atelier)
                     except ChallengeError as exc:
                         return {"status": "erreur_challenge", "error": str(exc)}
                     except Exception as exc:  # un challenge qui plante ne stoppe pas le lot
@@ -117,7 +119,7 @@ def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
         # Ni Docker ni --skip-server : on tente sur les seuls fichiers fournis.
     try:
         return run_challenge(ref.json_path, runs_dir, model, max_steps, sandbox, router=router,
-                             indice=indice, cascade=cascade)
+                             indice=indice, cascade=cascade, atelier=atelier)
     except ChallengeError as exc:
         return {"status": "erreur_challenge", "error": str(exc)}
     except Exception as exc:  # un challenge qui plante ne doit pas arrêter le lot
@@ -128,7 +130,7 @@ def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
 def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
             categories: list[str] | None = None, only: list[str] | None = None,
             skip_server: bool = False, sandbox=None, docker: bool = False, router=None,
-            indices: dict[str, str] | None = None, cascade=None) -> list[dict]:
+            indices: dict[str, str] | None = None, cascade=None, atelier=None) -> list[dict]:
     """Lance l'agent sur chaque challenge de la base et écrit un bilan.
 
     Les challenges à serveur (champ `compose` de la base CSAW) ne sont lancés
@@ -148,7 +150,7 @@ def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
     for ref in select(discover(root), categories, only):
         summary = _run_one(ref, runs_dir, model, max_steps, sandbox,
                            skip_server=skip_server, docker=docker_ok, router=router,
-                           indice=(indices or {}).get(ref.id), cascade=cascade)
+                           indice=(indices or {}).get(ref.id), cascade=cascade, atelier=atelier)
         summary.update(id=ref.id, category_db=ref.category, challenge=str(ref.json_path))
         results.append(summary)
         print(f"{summary['status']:<20} {ref.category:<10} {ref.id}", flush=True)
@@ -333,6 +335,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"erreur : {exc}", file=sys.stderr)
                 return 2
             print(f"shell en bac à sable : {sandbox.describe()}", file=sys.stderr)
+        atelier = None
+        if args.atelier is not None:
+            from .atelier import Atelier
+            atelier = Atelier(args.atelier)
         if args.command == "run-all":
             indices = None
             if args.indices is not None:
@@ -349,13 +355,13 @@ def main(argv: list[str] | None = None) -> int:
                               categories=args.categories, only=args.only,
                               skip_server=args.skip_server, sandbox=sandbox,
                               docker=args.docker, router=router, indices=indices,
-                              cascade=cascade)
+                              cascade=cascade, atelier=atelier)
             launched = [r for r in results if r["status"] != "ignore_serveur"]
             return 0 if launched and all(r["status"] == "resolu" for r in launched) else 1
         try:
             summary = run_challenge(args.challenge_json, args.runs_dir, model, args.max_steps,
                                     sandbox, router=router, indice=args.indice,
-                                    cascade=cascade)
+                                    cascade=cascade, atelier=atelier)
         except (ChallengeError, IndiceError) as exc:
             print(f"erreur : {exc}", file=sys.stderr)
             return 2

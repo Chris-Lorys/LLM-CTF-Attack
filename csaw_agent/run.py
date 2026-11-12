@@ -80,7 +80,7 @@ def valider_indice(indice: str) -> str:
 def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
                   model: ChatModel | None = None, max_steps: int = 20,
                   sandbox=None, net=None, router=None, ablation=None,
-                  indice: str | None = None, cascade=None) -> dict:
+                  indice: str | None = None, cascade=None, atelier=None) -> dict:
     if indice is not None:  # refusé avant de créer quoi que ce soit
         indice = valider_indice(indice)
     started = time.monotonic()
@@ -125,7 +125,9 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
             trace.log("sandbox", sandbox.describe())
         if net is not None:
             trace.log("network", net.target.describe())
-        toolbox = Toolbox(run_dir / "files", sandbox, net)
+        toolbox = Toolbox(run_dir / "files", sandbox, net, atelier)
+        if atelier is not None:
+            trace.log("ingestion", {"atelier": [o.nom for o in atelier.liste()]})
         # Variante E : plus d'outils déterministes, le LLM n'a que son raisonnement.
         if ablation is not None and not ablation.outils:
             toolbox.tools.clear()
