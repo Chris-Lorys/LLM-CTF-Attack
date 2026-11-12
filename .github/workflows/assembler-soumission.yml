@@ -4,7 +4,7 @@ name: assembler soumission
 # à partir des artefacts « runs » d'essais déjà terminés, et le publie comme un
 # artefact « soumission » à télécharger puis à pousser dans le dépôt d'équipe.
 #   transcripts/  traces intactes + rapports, nommés {categorie}_{nom}_{solved|unsolved}
-#   report/       write-ups (dossier writeups/ de ce dépôt)
+#   report/       rapport final (report/REPORT.md) + write-ups (writeups/)
 #   framework/    code source de l'agent, à ce commit
 #   ancillary/    toutes les tentatives, leurs traces et leurs bilans
 # N'exécute aucun LLM : ne consomme aucun quota.
@@ -51,6 +51,7 @@ jobs:
         run: |
           mkdir -p soumission/report soumission/framework
           if [ -d writeups ]; then cp -r writeups/. soumission/report/; fi
+          if [ -d report ]; then cp -r report/. soumission/report/; fi
           git archive HEAD | tar -x -C soumission/framework
           echo "Commit : ${{ github.sha }}" > soumission/framework/COMMIT.txt
 
