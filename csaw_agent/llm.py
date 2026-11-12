@@ -42,6 +42,7 @@ PRESETS = {
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
     "cerebras": "https://api.cerebras.ai/v1",
     "deepseek": "https://api.deepseek.com/v1",
+    "nvidia": "https://integrate.api.nvidia.com/v1",  # NVIDIA NIM (build.nvidia.com)
 }
 
 # Réglages propres aux offres gratuites des API : quotas par minute (on espace les
@@ -55,6 +56,9 @@ PRESET_OPTIONS = {
     "openrouter": {"min_interval": 3.5, "max_tokens": 32768},
     "cerebras": {"min_interval": 2.5, "max_tokens": 16384},  # qwen « réfléchit » : place pour le raisonnement + la réponse
     "deepseek": {"min_interval": 2.0, "max_tokens": 8192},
+    # NIM : offre dev gratuite (quota par minute), et les Nemotron « réfléchissent »
+    # → on espace les appels et on laisse de la place au raisonnement + la réponse.
+    "nvidia": {"min_interval": 2.0, "max_tokens": 16384},
 }
 
 # Réglages propres à un modèle précis, qui s'ajoutent à ceux du préréglage.
