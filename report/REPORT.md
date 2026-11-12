@@ -134,6 +134,18 @@ We ran the cascade for real (free model, then Kimi K3.1 Pro, 40 actions) on 4 ha
 - **The cascade does not make a model smarter.** It saves money and avoids dead runs. On challenges beyond the strong model's reach, it changes nothing.
 - The replay measures when a stall *would* have been detected, not what the stronger model would have done next.
 
+## 4b. A second custom capability: a toolsmith library
+
+The trajectories show the agent repeatedly writing its own tools: a PNG decoder, a lattice reduction, a database-journal parser. Each was written, used once, and thrown away with the run. The **toolsmith library** (`--atelier`) keeps them.
+
+- When the agent writes a useful script, it keeps it with an action (`garder_outil`). **The code**, not the model, validates that the script compiles, labels it (category, originating challenge) and stores it in a library that outlives the run.
+- On a later challenge, the available tools are listed in the opening prompt, and an action (`utiliser_outil`) copies one into the workspace, ready to run.
+- Both the keeping and the reuse are logged decisions, so the hash-chained trace shows exactly when a tool was born and when it served again.
+
+This is "by subtraction" applied to tooled memory: the model writes the logic once, the code turns it into a reliable, persistent tool. Like the cascade, it is a capability we provide and trace; on weak free models the agent does not always choose to use it, which the trajectories show honestly.
+
+**pwn tooling.** The sandboxed shell now also offers a debugger (`gdb`) and the `pwntools` library, alongside the disassembler and the server-only network tool. pwn stayed at 0 flags: on our 3 pwn challenges the blocker is the difficulty for the models and one server image that fails to build on the organisers' side, not the tooling. We add it as a traced capability for the autonomous-framework bonus, which the rules award "even if these approaches did not solve any challenge."
+
 ## 5. Prompting techniques
 
 - **ReAct in strict JSON** (`pensee` + `action` + `args`), rather than native function calling. Small open models follow it better, and it works with every provider. Malformed replies are repaired by code. After 3 unreadable replies the run stops, or escalates in cascade mode.
@@ -182,7 +194,7 @@ One write-up per challenge, built from our agent's trajectory only, is in this f
 **Unsolved (16).** Three causes:
 - **Budget and reach.** Hard crypto, pwn and web challenges where the model ran out of actions, even with Kimi.
 - **Model errors.** On free tiers, replies cut off by token limits, daily quotas and unreadable output. This is what motivated the cascade.
-- **Infrastructure.** One pwn challenge's server image failed to build on the organisers' side.
+- **Infrastructure.** One pwn challenge's server image failed to build on the organisers' side. The sandbox now carries pwn tooling (`gdb`, `pwntools`), but the blocker here is difficulty, not tools.
 
 All unsolved trajectories are submitted too, in `transcripts/` and `ancillary/`.
 
@@ -209,9 +221,9 @@ Our 7/23 is on a different, smaller set and is not directly comparable. What dis
 ## 10. Limits and next steps
 
 - **Cascade:** cap the free tier's share of the budget, then test it live with a larger budget.
-- **"Toolsmith" agent:** the trajectories show the agent repeatedly writing its own decoders and solvers. Keeping these as a reusable, tested tool library across challenges is the natural next step.
+- **Toolsmith library (prototyped, section 4b):** persist and reuse the tools the agent writes. Next, index them by category and test each one on a held-out input before offering it.
+- **pwn tooling (prototyped):** `gdb` and `pwntools` are now in the sandbox. Next, pre-load target binaries under the debugger and add a leak/offset helper.
 - **Model committee:** for the final decision on a strategy, compare two cheap models before paying for a strong one.
-- **pwn:** stayed at 0. This category would need dedicated tools (debugger, exploitation libraries) inside the sandbox.
 
 ## Reproducing
 
