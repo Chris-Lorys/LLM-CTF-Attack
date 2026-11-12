@@ -21,6 +21,9 @@ on:
       models:
         description: "Routage par catégorie, p. ex. crypto=openrouter:openrouter/free,default=openrouter:openrouter/free"
         default: ""
+      cascade:
+        description: "Cascade frugale 'gratuit>fort' (le code escalade quand la progression stagne) ; remplace model/models"
+        default: ""
       categories:
         description: "Catégories séparées par un espace (vide = toutes)"
         default: ""
@@ -34,6 +37,9 @@ on:
         description: "Démarrer les conteneurs des challenges à serveur"
         type: boolean
         default: true
+      indices:
+        description: 'Approche hybride : JSON {"identifiant": "indice humain"} (jamais de flag ni de solution ; vide = autonome)'
+        default: ""
 
 jobs:
   run:
@@ -48,9 +54,21 @@ jobs:
 
       - name: Outils d'analyse et utilisateur du bac à sable
         run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \
-            file binutils p7zip-full unzip sqlite3 tshark xxd libimage-exiftool-perl sox
+          export DEBIAN_FRONTEND=noninteractive
+          # tshark : coupe l'invite debconf dont le postinst peut bloquer.
+          echo "wireshark-common wireshark-common/install-setuid boolean false" \
+            | sudo debconf-set-selections
+          for i in 1 2 3; do
+            sudo timeout 240 apt-get -o Acquire::Retries=3 -qq update && break
+            echo "apt-get update : tentative $i échouée, nouvelle tentative"; sleep 5
+          done
+          # Outils essentiels (bloquant) puis optionnels pcap/audio (best-effort) :
+          # un miroir lent ne doit pas faire perdre un essai complet.
+          sudo timeout 300 apt-get -o Acquire::Retries=3 -qq install -y \
+            file binutils p7zip-full unzip sqlite3 xxd libimage-exiftool-perl \
+            || { echo "échec d'installation des outils essentiels"; exit 1; }
+          sudo timeout 300 apt-get -o Acquire::Retries=3 -qq install -y tshark sox \
+            || echo "outils optionnels (tshark/sox) non installés : on continue"
           pip install pytest pycryptodome scapy pyyaml
           id ctfsandbox || sudo useradd -M -s /bin/bash ctfsandbox
 
@@ -59,13 +77,24 @@ jobs:
 
       - name: Préparer les options
         id: opts
+        env:
+          # Passé par l'environnement, jamais interpolé dans le script (guillemets du JSON).
+          INDICES: ${{ inputs.indices }}
+          CASCADE: ${{ inputs.cascade }}
         run: |
           opts=""
+          if [ -n "$INDICES" ]; then
+            printf '%s' "$INDICES" > indices.json
+            opts="$opts --indices indices.json"
+          fi
           for c in ${{ inputs.categories }}; do opts="$opts --category $c"; done
           for o in ${{ inputs.only }}; do opts="$opts --only $o"; done
           if [ "${{ inputs.docker }}" = "true" ]; then opts="$opts --docker"; fi
-          # Routage multi-modèles si 'models' est rempli, sinon modèle unique.
-          if [ -n "${{ inputs.models }}" ]; then
+          # Cascade si remplie, sinon routage multi-modèles, sinon modèle unique.
+          if [ -n "$CASCADE" ]; then
+            printf '%s' "$CASCADE" > cascade.txt
+            opts="$opts --cascade @cascade.txt"  # « > » ne doit pas passer par le shell
+          elif [ -n "${{ inputs.models }}" ]; then
             opts="$opts --models ${{ inputs.models }}"
           else
             opts="$opts --model ${{ inputs.model }}"

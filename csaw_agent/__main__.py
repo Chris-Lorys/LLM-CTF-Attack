@@ -24,7 +24,7 @@ from .challenge import ChallengeError, ChallengeRef, discover, server_target
 from .compose import ComposeError, challenge_server, docker_available
 from .llm import make_model, make_router
 from .report import write_report
-from .run import run_challenge
+from .run import IndiceError, run_challenge, valider_indice
 from .sandbox import Sandbox, SandboxError
 from .trace import verify_trace
 
@@ -39,6 +39,11 @@ def _add_model_args(p: argparse.ArgumentParser) -> None:
                    "pwn=openrouter:moonshotai/kimi-k2.6:free,default=gemini:gemini-3.8-flash' "
                    "(remplace --model ; la clé de chaque fournisseur est lue dans "
                    "<FOURNISSEUR>_API_KEY, p. ex. OPENROUTER_API_KEY, GEMINI_API_KEY)")
+    p.add_argument("--cascade", help="cascade frugale : 'preset:modele_gratuit>preset:modele_fort' ; "
+                   "le code passe au palier suivant quand la progression mesurée stagne "
+                   "(remplace --model et --models)")
+    p.add_argument("--patience", type=int, default=6,
+                   help="cascade : étapes sans information nouvelle avant d'escalader")
     p.add_argument("--max-steps", type=int, default=20)
     p.add_argument("--shell", action="store_true",
                    help="donner au LLM un shell en bac à sable (root requis, voir sandbox.py)")
@@ -82,7 +87,8 @@ def _challenge_target(json_path: Path):
 
 
 def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
-             *, skip_server: bool, docker: bool, router=None) -> dict:
+             *, skip_server: bool, docker: bool, router=None, indice=None,
+             cascade=None) -> dict:
     """Résout un challenge, en démarrant son conteneur si c'est un challenge à serveur."""
     if ref.needs_server:
         target = _challenge_target(ref.json_path)
@@ -93,7 +99,8 @@ def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
                     from .net import NetworkClient
                     try:
                         return run_challenge(ref.json_path, runs_dir, model, max_steps,
-                                             sandbox, net=NetworkClient(local), router=router)
+                                             sandbox, net=NetworkClient(local), router=router,
+                                             indice=indice, cascade=cascade)
                     except ChallengeError as exc:
                         return {"status": "erreur_challenge", "error": str(exc)}
                     except Exception as exc:  # un challenge qui plante ne stoppe pas le lot
@@ -109,7 +116,8 @@ def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
             return {"status": "ignore_serveur"}
         # Ni Docker ni --skip-server : on tente sur les seuls fichiers fournis.
     try:
-        return run_challenge(ref.json_path, runs_dir, model, max_steps, sandbox, router=router)
+        return run_challenge(ref.json_path, runs_dir, model, max_steps, sandbox, router=router,
+                             indice=indice, cascade=cascade)
     except ChallengeError as exc:
         return {"status": "erreur_challenge", "error": str(exc)}
     except Exception as exc:  # un challenge qui plante ne doit pas arrêter le lot
@@ -119,7 +127,8 @@ def _run_one(ref: ChallengeRef, runs_dir: Path, model, max_steps: int, sandbox,
 
 def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
             categories: list[str] | None = None, only: list[str] | None = None,
-            skip_server: bool = False, sandbox=None, docker: bool = False, router=None) -> list[dict]:
+            skip_server: bool = False, sandbox=None, docker: bool = False, router=None,
+            indices: dict[str, str] | None = None, cascade=None) -> list[dict]:
     """Lance l'agent sur chaque challenge de la base et écrit un bilan.
 
     Les challenges à serveur (champ `compose` de la base CSAW) ne sont lancés
@@ -128,6 +137,8 @@ def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
     avec `skip_server`, ils sont notés `ignore_serveur`.
 
     Avec `router`, le modèle est choisi par catégorie (routage multi-modèles).
+    Avec `indices` ({identifiant: indice}), les challenges concernés sont joués en
+    approche hybride : l'indice humain est ajouté au prompt et consigné dans la trace.
     """
     results = []
     runs_dir = Path(runs_dir)
@@ -136,7 +147,8 @@ def run_all(root: Path, runs_dir: Path, model, max_steps: int, *,
         print("Docker demandé mais indisponible : challenges à serveur ignorés.", flush=True)
     for ref in select(discover(root), categories, only):
         summary = _run_one(ref, runs_dir, model, max_steps, sandbox,
-                           skip_server=skip_server, docker=docker_ok, router=router)
+                           skip_server=skip_server, docker=docker_ok, router=router,
+                           indice=(indices or {}).get(ref.id), cascade=cascade)
         summary.update(id=ref.id, category_db=ref.category, challenge=str(ref.json_path))
         results.append(summary)
         print(f"{summary['status']:<20} {ref.category:<10} {ref.id}", flush=True)
@@ -166,12 +178,16 @@ def main(argv: list[str] | None = None) -> int:
 
     p_run = sub.add_parser("run", help="résoudre un challenge")
     p_run.add_argument("challenge_json", type=Path)
+    p_run.add_argument("--indice", help="approche hybride : indice humain (jamais la solution "
+                       "ni un flag), ajouté au prompt et consigné dans la trace")
     _add_model_args(p_run)
 
     p_all = sub.add_parser("run-all", help="résoudre tous les challenges d'un dossier")
     p_all.add_argument("root", type=Path, help="dossier de challenges ou dataset.json")
     _add_model_args(p_all)
     _add_select_args(p_all)
+    p_all.add_argument("--indices", type=Path,
+                       help="approche hybride : fichier JSON {identifiant: indice humain}")
     p_all.add_argument("--skip-server", action="store_true",
                        help="ne pas lancer les challenges qui demandent un serveur")
     p_all.add_argument("--docker", action="store_true",
@@ -208,7 +224,31 @@ def main(argv: list[str] | None = None) -> int:
     p_anal.add_argument("traces", type=Path, nargs="+", help="fichiers trace.jsonl")
     p_anal.add_argument("--out", type=Path, default=Path("ablation-retrospective.json"))
 
+    p_cas = sub.add_parser("cascade-traces",
+                           help="évaluer la cascade frugale en rejouant des traces (coût nul)")
+    p_cas.add_argument("traces", type=Path, nargs="+", help="fichiers trace.jsonl")
+    p_cas.add_argument("--out", type=Path, default=Path("cascade-retrospective.json"))
+
+    p_ech = sub.add_parser("echecs",
+                           help="dossier de ce que l'agent a tenté sur les non-résolus (coût nul)")
+    p_ech.add_argument("traces", type=Path, nargs="+", help="fichiers trace.jsonl")
+    p_ech.add_argument("--out", type=Path, default=Path("echecs.md"))
+
     args = parser.parse_args(argv)
+
+    if args.command == "cascade-traces":
+        from .cascade import evaluer_cascade, tableau_cascade
+        resultat = evaluer_cascade(args.traces)
+        args.out.write_text(json.dumps(resultat, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(tableau_cascade(resultat))
+        return 0
+
+    if args.command == "echecs":
+        from .echecs import dossier_echecs
+        texte = dossier_echecs(args.traces)
+        args.out.write_text(texte, encoding="utf-8")
+        print(texte)
+        return 0
 
     if args.command == "ablation-traces":
         from .ablation import analyser_traces
@@ -225,9 +265,9 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             return 2
         try:
-            if args.models:
-                print("erreur : l'ablation fixe un modèle unique (--model), pas --models",
-                      file=sys.stderr)
+            if args.models or args.cascade:
+                print("erreur : l'ablation fixe un modèle unique (--model), "
+                      "pas --models ni --cascade", file=sys.stderr)
                 return 2
             model = make_model(args.model, args.base_url) if args.model else None
         except ValueError as exc:
@@ -260,12 +300,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("run", "run-all"):
         router = None
         model = None
+        cascade = None
         try:
-            if args.models:
+            if args.cascade:
+                from .cascade import make_cascade
+                spec = args.cascade
+                if spec.startswith("@"):  # spec lue dans un fichier (workflow : « > » hors du shell)
+                    spec = Path(spec[1:]).read_text(encoding="utf-8").strip()
+                cascade = make_cascade(spec, args.base_url, patience=args.patience)
+            elif args.models:
                 router = make_router(args.models, args.base_url)
             elif args.model:
                 model = make_model(args.model, args.base_url)
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             print(f"erreur : {exc}", file=sys.stderr)
             return 2
         sandbox = None
@@ -284,16 +331,29 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             print(f"shell en bac à sable : {sandbox.describe()}", file=sys.stderr)
         if args.command == "run-all":
+            indices = None
+            if args.indices is not None:
+                try:
+                    indices = json.loads(args.indices.read_text(encoding="utf-8"))
+                    if not isinstance(indices, dict):
+                        raise ValueError("objet JSON {identifiant: indice} attendu")
+                    for cid, txt in indices.items():
+                        valider_indice(str(txt))
+                except (OSError, ValueError) as exc:
+                    print(f"erreur : indices refusés : {exc}", file=sys.stderr)
+                    return 2
             results = run_all(args.root, args.runs_dir, model, args.max_steps,
                               categories=args.categories, only=args.only,
                               skip_server=args.skip_server, sandbox=sandbox,
-                              docker=args.docker, router=router)
+                              docker=args.docker, router=router, indices=indices,
+                              cascade=cascade)
             launched = [r for r in results if r["status"] != "ignore_serveur"]
             return 0 if launched and all(r["status"] == "resolu" for r in launched) else 1
         try:
             summary = run_challenge(args.challenge_json, args.runs_dir, model, args.max_steps,
-                                    sandbox, router=router)
-        except ChallengeError as exc:
+                                    sandbox, router=router, indice=args.indice,
+                                    cascade=cascade)
+        except (ChallengeError, IndiceError) as exc:
             print(f"erreur : {exc}", file=sys.stderr)
             return 2
         print(json.dumps(summary, ensure_ascii=False, indent=2))

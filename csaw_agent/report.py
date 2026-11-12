@@ -56,6 +56,12 @@ def build_report(trace_path: Path) -> str:
     checks = [e["payload"] for e in events if e["type"] == "check_flag"]
     valid = next((c for c in checks if c["valid"]), None)
     stops = [e["payload"] for e in events if e["type"] == "decision" and "stop" in e["payload"]]
+    cascade = next((e["payload"]["cascade"] for e in events
+                    if e["type"] == "ingestion" and "cascade" in e["payload"]), None)
+    escalades = [e["payload"]["escalade"] for e in events
+                 if e["type"] == "decision" and "escalade" in e["payload"]]
+    indice = next((e["payload"]["indice_humain"] for e in events
+                   if e["type"] == "ingestion" and "indice_humain" in e["payload"]), None)
 
     lines = [
         f"# Rapport de résolution : {_cell(view.get('name', '?'))}",
@@ -71,7 +77,10 @@ def build_report(trace_path: Path) -> str:
         f"| Validé par `check_flag` | {'oui, source : ' + _cell(valid['source']) if valid else 'non'} |",
         f"| Catégorie annoncée | {_cell(view.get('category'))} |",
         f"| Catégorie identifiée par l'agent | {_cell(end.get('category'))} |",
+        f"| Approche | {'hybride (indice humain, voir plus bas)' if indice else 'autonome (aucune intervention humaine)'} |",
         f"| Modèle | {_cell(end.get('model') or 'aucun (pré-scan seul)')} |",
+        *([f"| Cascade frugale | {_cell(' > '.join(cascade['paliers']))} ; "
+           f"{len(escalades)} escalade(s) décidée(s) par le code |"] if cascade else []),
         f"| Actions du LLM | {end.get('llm_steps', 0)} |",
         f"| Vérifications de flag | {len(checks)} |",
         f"| Durée | {end.get('duration_s', '?')} s |",
@@ -89,6 +98,17 @@ def build_report(trace_path: Path) -> str:
         "",
         f"- Serveur : {_cell(view.get('server') or 'aucun')}",
     ]
+    if indice:
+        lines[lines.index("## Challenge"):lines.index("## Challenge")] = [
+            "## Indice humain (approche hybride)",
+            "",
+            "Seule intervention humaine du run, consignée dans la trace avant le premier appel "
+            "au modèle. C'est une orientation, jamais la solution : un indice contenant un flag "
+            "est refusé par le code.",
+            "",
+            f"> {_cell(indice, 500)}",
+            "",
+        ]
     for f in view.get("files", []):
         lines.append(f"- Fichier {_cell(f['name'])} : {f['size']} octets, sha256 `{f['sha256']}`")
 
@@ -125,6 +145,10 @@ def build_report(trace_path: Path) -> str:
         elif e["type"] == "check_flag" and pending and p["source"] == "llm":
             lines.append(row(*pending, "flag valide" if p["valid"] else "flag refusé"))
             pending = None
+        elif e["type"] == "decision" and "escalade" in p:
+            x = p["escalade"]
+            lines.append(f"| {x['step']} | — | escalade décidée par le code : {_cell(x['raison'])} "
+                         f"| changement de modèle | {_cell(x['de'])} → {_cell(x['vers'])} |")
         elif e["type"] in ("prompt", "llm_response", "decision", "end") and pending:
             # Action sans sortie d'outil : abandon, ou appel mal formé renvoyé au LLM.
             lines.append(row(*pending, "abandon" if pending[1]["tool"] == "give_up"

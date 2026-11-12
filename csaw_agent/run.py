@@ -54,9 +54,35 @@ def prescan(challenge: Challenge, verifier: FlagVerifier, trace: TraceWriter,
     return None
 
 
+MAX_INDICE = 500
+
+
+class IndiceError(ValueError):
+    """Indice humain refusé (vide, trop long, ou contenant un flag)."""
+
+
+def valider_indice(indice: str) -> str:
+    """Un indice humain oriente l'agent, il ne doit jamais contenir la réponse.
+
+    Règlement CSAW : l'humain peut donner des indices, la solution doit venir de
+    l'IA. On refuse donc tout indice qui contient une chaîne au format d'un flag.
+    """
+    texte = indice.strip()
+    if not texte:
+        raise IndiceError("indice vide")
+    if len(texte) > MAX_INDICE:
+        raise IndiceError(f"indice trop long ({len(texte)} > {MAX_INDICE} caractères)")
+    if find_candidates(texte):
+        raise IndiceError("un indice ne doit contenir aucun flag")
+    return texte
+
+
 def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
                   model: ChatModel | None = None, max_steps: int = 20,
-                  sandbox=None, net=None, router=None, ablation=None) -> dict:
+                  sandbox=None, net=None, router=None, ablation=None,
+                  indice: str | None = None, cascade=None) -> dict:
+    if indice is not None:  # refusé avant de créer quoi que ce soit
+        indice = valider_indice(indice)
     started = time.monotonic()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = Path(runs_dir) / _SAFE.sub("_", Path(json_path).parent.name) / stamp
@@ -67,11 +93,21 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
 
     challenge, verifier = load_challenge(json_path, run_dir)
     trace.log("ingestion", challenge.to_view())
+    # Approche hybride : l'indice humain est consigné mot pour mot, avant tout appel
+    # au modèle, dans la trace chaînée. Il est donc impossible de l'ajouter ou de
+    # le modifier après coup sans que verify-trace le détecte.
+    if indice is not None:
+        trace.log("ingestion", {"indice_humain": indice, "approche": "hybride"})
 
     # Routage multi-modèles : le modèle est choisi selon la catégorie du challenge.
     if router is not None:
         trace.log("ingestion", {"routeur": router.describe()})
         model = router.for_category(challenge.category)
+
+    # Cascade frugale : on démarre sur le palier le moins cher.
+    if cascade is not None:
+        trace.log("ingestion", {"cascade": cascade.describe()})
+        model = cascade.paliers[0]
 
     # En ablation, on peut retirer le pré-scan déterministe (variante B).
     tried: set[str] = set()
@@ -82,6 +118,7 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
         flag = prescan(challenge, verifier, trace, tried)
     status = "resolu" if flag else "non_resolu"
     category, steps, error = None, 0, None
+    escalades: list[dict] = []
 
     if flag is None and model is not None:
         if sandbox is not None:
@@ -101,8 +138,10 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
             trace.log("ingestion", {"briefing": {"faits": briefing.faits,
                                                  "fiches": len(briefing.fiches)}})
         agent = Agent(model, toolbox, verifier, trace, max_steps,
-                      ablation=ablation, briefing=briefing_txt)
+                      ablation=ablation, briefing=briefing_txt, indice=indice,
+                      cascade=cascade)
         result = agent.solve(challenge, tried)
+        model, escalades = agent.model, agent.escalades
         flag, category, steps, error = result.flag, result.category, result.steps, result.error
         status = result.status if result.status != "budget_epuise" else "non_resolu"
 
@@ -115,7 +154,10 @@ def run_challenge(json_path: Path, runs_dir: Path = Path("runs"),
         "attempts": verifier.attempts,
         "duration_s": round(time.monotonic() - started, 3),
         "run_dir": str(run_dir),
+        "approche": "hybride" if indice else "autonome",
     }
+    if cascade is not None:
+        summary["cascade"] = {**cascade.describe(), "escalades": escalades}
     if error:
         summary["error"] = error
     trace.log("end", summary)

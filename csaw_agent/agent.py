@@ -19,6 +19,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from .cascade import TraceObservee, etat_compact
 from .challenge import Challenge
 from .flag import FlagVerifier, find_candidates
 from .hypotheses import HypothesisRegister
@@ -181,11 +182,22 @@ def initial_message(challenge: Challenge, has_net: bool = False) -> str:
 class Agent:
     def __init__(self, model: ChatModel, toolbox: Toolbox, verifier: FlagVerifier,
                  trace: TraceWriter, max_steps: int = 20, *, ablation=None,
-                 briefing: str = ""):
+                 briefing: str = "", indice: str | None = None, cascade=None):
         self.model = model
         self.toolbox = toolbox
         self.verifier = verifier
         self.trace = trace
+        # Cascade frugale : le code mesure la progression et passe la main au palier
+        # suivant quand le modèle courant stagne (voir cascade.py).
+        self.cascade = cascade
+        self.palier = 0
+        self.escalades: list[dict] = []
+        self.actions: list[str] = []   # actions déjà faites, pour la passation
+        self.refuses: list[str] = []   # candidats refusés, pour la passation
+        if cascade is not None:
+            self.model = cascade.paliers[0]
+            self.moniteur = cascade.moniteur()
+            self.trace = TraceObservee(trace, self.moniteur)
         self.max_steps = max_steps
         # Étude d'ablation : par défaut toutes les briques sont actives.
         self.use_memory = ablation.memoire if ablation else True
@@ -194,6 +206,7 @@ class Agent:
         self.use_hypotheses = ablation.hypotheses if ablation else True
         # Briefing de faits rédigé par le code (vide si retiré en ablation).
         self.briefing = briefing if self.use_briefing else ""
+        self.indice = indice
         self.hyps = HypothesisRegister()
         self.tried: set[str] = set()
         # Dernières actions : un petit modèle relance souvent la même commande en boucle.
@@ -203,6 +216,8 @@ class Agent:
     def _check(self, candidate: str, source: str) -> bool:
         self.tried.add(candidate)
         ok = self.verifier.check(candidate)
+        if not ok:
+            self.refuses.append(candidate)
         self.trace.log("check_flag", {"candidate": candidate, "source": source, "valid": ok})
         return ok
 
@@ -240,18 +255,28 @@ class Agent:
         intro = initial_message(challenge, self.toolbox.net is not None)
         if self.briefing:
             intro += "\n\n" + self.briefing
+        if self.indice:
+            intro += ("\n\nIndice d'un membre de l'équipe (approche hybride ; c'est une "
+                      "orientation, pas une solution, à vérifier par tes outils) :\n"
+                      + self.indice)
         messages: list[Message] = [
             {"role": "system", "content": SYSTEM_PROMPT.format(tools=tools)},
             {"role": "user", "content": intro},
         ]
         self.trace.log("prompt", {"model": self.model.name, "messages": messages})
+        self._base = [dict(m) for m in messages]
 
         category = None
         parse_errors = 0
         for step in range(1, self.max_steps + 1):
+            if self._peut_escalader() and (raison := self.moniteur.stagne()):
+                self._escalader(messages, raison, step)
             try:
                 reply = self.model.complete(self._window(messages))
             except LLMError as exc:
+                if self._peut_escalader():
+                    self._escalader(messages, f"erreur du modèle ({str(exc)[:120]})", step)
+                    continue
                 self.trace.log("decision", {"step": step, "stop": "erreur_llm", "error": str(exc)})
                 return AgentResult("erreur_llm", None, step, category, error=str(exc))
             self.trace.log("llm_response", {"step": step, "content": reply})
@@ -262,6 +287,10 @@ class Agent:
                 parse_errors = 0
             except ValueError as exc:
                 parse_errors += 1
+                if parse_errors >= MAX_PARSE_ERRORS and self._peut_escalader():
+                    parse_errors = 0
+                    self._escalader(messages, "réponses illisibles répétées", step)
+                    continue
                 if parse_errors >= MAX_PARSE_ERRORS:
                     self.trace.log("decision", {"step": step, "stop": "reponses_illisibles"})
                     return AgentResult("reponses_illisibles", None, step, category)
@@ -277,6 +306,7 @@ class Agent:
             name, args = action["action"], action["args"]
             self.trace.log("tool_call", {"step": step, "tool": name, "args": args,
                                          "pensee": action.get("pensee")})
+            self.actions.append(f"{name} {json.dumps(args, ensure_ascii=False)}"[:120])
 
             if name == "check_flag":
                 candidate = args.get("candidate") if isinstance(args, dict) else None
@@ -351,6 +381,30 @@ class Agent:
 
         self.trace.log("decision", {"step": self.max_steps, "stop": "budget_epuise"})
         return AgentResult("budget_epuise", None, self.max_steps, category)
+
+    def _peut_escalader(self) -> bool:
+        return self.cascade is not None and self.palier + 1 < len(self.cascade.paliers)
+
+    def _escalader(self, messages: list[Message], raison: str, step: int) -> None:
+        """Passe au palier suivant avec un état compact établi par le code.
+
+        Le contexte repart de la présentation du challenge enrichie de la passation :
+        le modèle plus fort ne relit pas l'historique où le précédent s'est perdu.
+        Notes et hypothèses sont déjà réinjectées par _window, on ne les double pas.
+        """
+        ancien = self.model.name
+        self.palier += 1
+        self.model = self.cascade.paliers[self.palier]
+        self.escalades.append({"step": step, "de": ancien, "vers": self.model.name,
+                               "raison": raison})
+        self.trace.log("decision", {"step": step, "escalade": self.escalades[-1]})
+        passation = etat_compact(self.palier, len(self.cascade.paliers), raison,
+                                 [] if self.use_memory else self.notes, "",
+                                 self.actions, self.refuses)
+        messages[:] = [self._base[0], {"role": "user",
+                                       "content": self._base[1]["content"] + "\n\n" + passation}]
+        self.trace.log("prompt", {"model": self.model.name, "messages": messages})
+        self.moniteur.reinitialiser()
 
     def _budget(self, step: int) -> str:
         left = self.max_steps - step

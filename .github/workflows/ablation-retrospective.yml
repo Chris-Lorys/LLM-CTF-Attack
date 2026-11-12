@@ -5,6 +5,9 @@ name: ablation retrospective
 # ce que chaque brique « par retrait » a réellement apporté — d'où vient chaque
 # flag (pré-scan / vérification auto / check_flag du LLM), combien de candidats
 # trompeurs le garde-fou a écartés, combien de répétitions ont été bloquées.
+# Produit aussi le dossier des échecs (echecs.md) : pour chaque challenge jamais
+# résolu, ce que l'agent a tenté. Il sert à écrire les indices de l'approche
+# hybride (orientation, jamais solution). La base CSAW n'est pas clonée ici.
 
 on:
   workflow_dispatch:
@@ -41,8 +44,21 @@ jobs:
           echo "${#traces[@]} trace(s) trouvée(s)."
           python -m csaw_agent ablation-traces "${traces[@]}" --out ablation-retrospective.json
 
+      - name: Dossier des échecs
+        run: |
+          shopt -s globstar nullglob
+          python -m csaw_agent echecs essais/**/trace.jsonl --out echecs.md
+
+      - name: Cascade frugale (rejeu des traces)
+        run: |
+          shopt -s globstar nullglob
+          python -m csaw_agent cascade-traces essais/**/trace.jsonl --out cascade-retrospective.json
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ablation-retrospective
-          path: ablation-retrospective.json
+          path: |
+            ablation-retrospective.json
+            echecs.md
+            cascade-retrospective.json

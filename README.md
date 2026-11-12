@@ -59,6 +59,41 @@ Chaque run produit `runs/<challenge>/<horodatage>/` avec `trace.jsonl`, `rapport
 des fichiers. Le rapport cite l'empreinte finale de la chaîne de hachages de la trace : on peut
 vérifier que la trace jointe est bien celle dont il est tiré.
 
+## Cascade frugale pilotée par la progression
+
+`--cascade "preset:modele_gratuit>preset:modele_fort"` fait travailler d'abord un modèle
+gratuit. À chaque étape, le code mesure la progression : gain d'information (lignes de
+sortie jamais vues, notes, hypothèses tranchées) ou échec (erreur d'outil, action répétée,
+flag refusé, réponse illisible). Quand l'agent stagne (`--patience` étapes sans gain, ou
+3 échecs d'affilée), ou si le modèle tombe en erreur, **c'est le code qui décide** de passer
+au palier suivant. Le modèle plus fort ne relit pas l'historique : il reçoit un état compact
+établi par le code (notes, hypothèses, actions déjà faites, candidats refusés).
+Chaque escalade et sa raison sont consignées dans la trace et dans `rapport.md`.
+
+```bash
+python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json --shell \
+  --cascade "openrouter:nvidia/nemotron-3.5-super-vl:free>openrouter:moonshotai/kimi-k3.1-pro"
+python -m csaw_agent cascade-traces runs/**/trace.jsonl   # évaluation à coût nul sur des traces
+```
+
+## Approche hybride (indice humain)
+
+Le règlement CSAW autorise, challenge par challenge, une approche hybride agent + humain, tant
+que la solution vient de l'IA. L'option `--indice` (ou `--indices fichier.json` pour `run-all`,
+input `indices` du workflow) ajoute un indice humain au prompt de départ :
+
+```bash
+python -m csaw_agent run chemin/challenge.json --model ... --indice "le fichier semble encodé"
+python -m csaw_agent run-all CSAW26_LLMAC_DB/dataset.json --model ... --indices indices.json
+```
+
+- L'indice est **consigné mot pour mot dans la trace chaînée, avant le premier appel au modèle** :
+  impossible de l'ajouter ou de le retoucher après coup sans que `verify-trace` le détecte.
+- Le code **refuse tout indice contenant une chaîne au format d'un flag** (et les indices vides
+  ou de plus de 500 caractères) : l'humain oriente, il ne donne jamais la réponse.
+- `rapport.md` et le récapitulatif de soumission affichent l'approche (`autonome` / `hybride`)
+  et l'indice exact.
+
 ## Règles respectées
 
 - Le flag attendu n'est jamais transmis au LLM, qui ne reçoit que le résultat vrai/faux de `check_flag`.
